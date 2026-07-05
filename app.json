@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "HatoSync-Mobile",
+    "name": "HatoSync",
     "slug": "HatoSync-Mobile",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -9,16 +9,50 @@
     "ios": {
       "supportsTablet": true
     },
+    "androidStatusBar": {
+      "translucent": false,
+      "backgroundColor": "#FDFCF8",
+      "barStyle": "dark-content"
+    },
     "android": {
+      "package": "com.hatosync.mobile",
+      "softwareKeyboardLayoutMode": "resize",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
-      }
+      },
+      "permissions": [
+        "android.permission.RECORD_AUDIO"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-secure-store",
+      "@react-native-community/datetimepicker",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "HatoSync usa tus fotos para registrar imágenes de los animales."
+        }
+      ],
+      "expo-sqlite",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "f452d988-942e-4bd8-a389-9a089a5a920d"
+      }
     }
   }
 }
