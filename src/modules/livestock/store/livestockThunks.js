@@ -1,8 +1,10 @@
 import * as Crypto from 'expo-crypto'
 import apiClient from '@/api/client'
 import { fetchState, createItem } from '@/modules/shared/store/sharedThunks'
+import { crudRegistry } from '@/modules/shared/store/createCrudSlice'
 import { isOnline } from '@/sync/connectivity'
 import { enqueue } from '@/sync/outbox'
+import { persistOutboxPhoto } from '@/sync/photoStore'
 import {
   getAnimalFullLocal,
   getEventsLocal,
@@ -11,6 +13,9 @@ import {
   cacheUpsertEvent,
   cacheUpsertWeight,
   cacheDeleteWeight,
+  cacheUpsertItem,
+  cacheUpsertPhoto,
+  cacheDeletePhoto,
 } from '@/db/repositories'
 
 /**
@@ -39,9 +44,13 @@ export const refreshExternals = () => (dispatch) =>
 export const fetchReproductionEvents = (animalId) => async () => {
   try {
     const { data } = await apiClient.get(`/livestock/animals/${animalId}/reproduction/`)
-    return data
+    // Tolerar array plano o respuesta paginada { results: [...] }.
+    if (Array.isArray(data)) return data
+    if (data && Array.isArray(data.results)) return data.results
+    return []
   } catch (e) {
-    return getEventsLocal(animalId)
+    const local = await getEventsLocal(animalId)
+    return Array.isArray(local) ? local : []
   }
 }
 
@@ -187,23 +196,86 @@ export const weanCalf =
   async (dispatch) =>
     dispatch(createReproductionEvent({ animalId, data: { event_type: 'WEANING', ...data } }))
 
+// Refleja las fotos optimistas (URIs locales) en el animal de Redux + cache,
+// para que la miniatura del listado y la ficha las muestren de inmediato.
+function attachPhotosOptimistic({ dispatch, getState, animalId, added, removedIds }) {
+  const state = getState().livestock
+  const nameState = ['animals', 'externals'].find((n) =>
+    (state[n] || []).some((a) => String(a.id) === String(animalId))
+  )
+  if (!nameState) return
+  const animal = state[nameState].find((a) => String(a.id) === String(animalId))
+  const photos = [...added, ...(animal.photos || [])].filter((p) => !removedIds.includes(p.id))
+  const merged = { ...animal, photos, primary_photo: photos[0] ? photos[0].image : null }
+  dispatch(crudRegistry.livestock.UPDATE_ITEM({ nameState, key: 'id', value: merged }))
+  cacheUpsertItem('livestock', nameState, activeFarmId(getState), merged).catch(() => {})
+}
+
 /**
- * Fotos: endpoint multipart, ONLINE-ONLY por ahora (binarios offline = Fase 3).
+ * Fotos: local-first (Fase 3). Online sube/borra ya; offline copia el archivo a
+ * almacenamiento persistente, lo encola como operación UPLOAD (multipart) y la
+ * foto aparece de inmediato con su URI local. El UUID lo genera el cliente, así
+ * el POST reintentado es idempotente en el servidor.
  * newFiles: [{uri, name, type}]; removedIds: ids a borrar.
+ * Devuelve { queued } para que la UI avise cuántas quedaron por subir.
  */
 export const syncAnimalPhotos =
   ({ animalId, newFiles = [], removedIds = [] }) =>
-  async (dispatch) => {
-    if (!(await isOnline())) return // offline: se omiten; las fotos sincronizan en Fase 3
+  async (dispatch, getState) => {
+    let queued = 0
+    let uploadedOnline = false
+    const queuedPhotos = []
+
     for (const file of newFiles) {
-      const formData = new FormData()
-      formData.append('image', { uri: file.uri, name: file.name, type: file.type })
-      await apiClient.post(`/livestock/animals/${animalId}/photos/`, formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
+      const photoId = Crypto.randomUUID()
+      if (await isOnline()) {
+        try {
+          const formData = new FormData()
+          formData.append('id', photoId)
+          formData.append('image', { uri: file.uri, name: file.name, type: file.type })
+          await apiClient.post(`/livestock/animals/${animalId}/photos/`, formData, {
+            headers: { 'Content-Type': 'multipart/form-data' },
+          })
+          uploadedOnline = true
+          continue
+        } catch (e) {
+          if (!isNetworkError(e)) throw e // validación/permiso → al usuario
+        }
+      }
+      // offline (o se cayó la señal a mitad): copia persistente + cola
+      const localUri = await persistOutboxPhoto(photoId, file.uri)
+      const optimistic = { id: photoId, image: localUri, caption: '', _pending: true }
+      await cacheUpsertPhoto(animalId, optimistic).catch(() => {})
+      await enqueue({
+        method: 'UPLOAD',
+        url: `/livestock/animals/${animalId}/photos/`,
+        body: { animalId, id: photoId, field: 'image', file: { uri: localUri, name: file.name, type: file.type } },
+        entityId: photoId,
       })
+      queuedPhotos.push(optimistic)
+      queued += 1
     }
+
     for (const photoId of removedIds) {
-      await apiClient.delete(`/livestock/animals/${animalId}/photos/${photoId}/`)
+      const url = `/livestock/animals/${animalId}/photos/${photoId}/`
+      if (await isOnline()) {
+        try {
+          await apiClient.delete(url)
+          await cacheDeletePhoto(photoId).catch(() => {})
+          uploadedOnline = true
+          continue
+        } catch (e) {
+          if (!isNetworkError(e)) throw e
+        }
+      }
+      await cacheDeletePhoto(photoId).catch(() => {})
+      await enqueue({ method: 'DELETE', url, body: null, entityId: photoId })
+      queued += 1
     }
-    if (newFiles.length || removedIds.length) await dispatch(refreshAnimals())
+
+    if (queuedPhotos.length || (queued && removedIds.length)) {
+      attachPhotosOptimistic({ dispatch, getState, animalId, added: queuedPhotos, removedIds })
+    }
+    if (uploadedOnline) await dispatch(refreshAnimals()).catch(() => {})
+    return { queued }
   }

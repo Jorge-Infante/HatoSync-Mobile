@@ -1,4 +1,5 @@
 import { getDb } from './index'
+import { clearOutboxPhotos } from '@/sync/photoStore'
 
 const sid = (v) => (v == null ? null : String(v))
 const parse = (rows) => rows.map((r) => JSON.parse(r.data))
@@ -50,6 +51,21 @@ export async function saveAnimalFull(farmId, full) {
   })
 }
 
+// Upsert de UNA foto (offline Fase 3: la foto encolada entra al cache con su
+// URI local y, al subir, se reconcilia con la URL del servidor — mismo UUID).
+export async function cacheUpsertPhoto(animalId, photo) {
+  const db = await getDb()
+  await db.runAsync(
+    'INSERT OR REPLACE INTO animal_photos (id, animal_id, image, caption, data) VALUES (?,?,?,?,?)',
+    [sid(photo.id), sid(animalId), photo.image ?? '', photo.caption ?? '', JSON.stringify(photo)]
+  )
+}
+
+export async function cacheDeletePhoto(photoId) {
+  const db = await getDb()
+  await db.runAsync('DELETE FROM animal_photos WHERE id = ?', [sid(photoId)])
+}
+
 async function replaceScoped(table, farmId, list) {
   const db = await getDb()
   await db.withTransactionAsync(async () => {
@@ -98,6 +114,8 @@ export async function clearLocalData() {
   await db.withTransactionAsync(async () => {
     for (const t of tables) await db.runAsync(`DELETE FROM ${t}`)
   })
+  // La outbox se fue con la cuenta anterior → sus copias de fotos también.
+  await clearOutboxPhotos()
 }
 
 // --- Reads (hydration / offline queries) -----------------------------------

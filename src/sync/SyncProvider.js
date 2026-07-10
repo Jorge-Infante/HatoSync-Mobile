@@ -3,7 +3,7 @@ import NetInfo from '@react-native-community/netinfo'
 import store from '@/store'
 import { pendingCount, errorCount, flushOutbox, retryErrored } from '@/sync/outbox'
 import { refreshAnimals } from '@/modules/livestock/store/livestockThunks'
-import { isOnline } from '@/sync/connectivity'
+import { isOnline, isDegraded, onConnectivityChange } from '@/sync/connectivity'
 
 /**
  * App-wide sync state + engine. Tracks how many writes are queued (pending) and
@@ -55,7 +55,16 @@ export function SyncProvider({ children }) {
       if (online && !wasOnline.current) sync()
       wasOnline.current = online
     })
-    return unsub
+    // Señal intermitente: netinfo no cambia cuando el modo degradado termina
+    // (la antena nunca se fue) — al salir del degradado, subir lo pendiente.
+    const unsubDegraded = onConnectivityChange(() => {
+      if (!isDegraded()) sync()
+      refresh() // el badge "por subir" refleja lo encolado durante el degradado
+    })
+    return () => {
+      unsub()
+      unsubDegraded()
+    }
   }, [refresh, sync])
 
   return (

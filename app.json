@@ -16,9 +16,10 @@
     },
     "android": {
       "package": "com.hatosync.mobile",
+      "googleServicesFile": "./google-services.json",
       "softwareKeyboardLayoutMode": "resize",
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
+        "backgroundColor": "#2E7D32",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
@@ -36,7 +37,15 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "HatoSync usa tus fotos para registrar imágenes de los animales."
+          "photosPermission": "HatoSync usa tus fotos para registrar imágenes de los animales.",
+          "cameraPermission": "HatoSync usa la cámara para tomar fotos de los animales."
+        }
+      ],
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "HatoSync organiza en tu galería las fotos que tomas de los animales.",
+          "savePhotosPermission": "HatoSync guarda las fotos que tomas en la carpeta HatoSync de tu galería."
         }
       ],
       "expo-sqlite",
@@ -46,6 +55,24 @@
           "android": {
             "usesCleartextTraffic": true
           }
+        }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 168,
+          "resizeMode": "contain",
+          "backgroundColor": "#F5F3EB"
+        }
+      ],
+      "expo-font",
+      "expo-image",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png",
+          "color": "#2E7D32"
         }
       ]
     ],

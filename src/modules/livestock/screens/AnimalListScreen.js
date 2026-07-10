@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { View, FlatList, StyleSheet, RefreshControl } from 'react-native'
 import { Card, Text, Chip, Avatar, Searchbar, ActivityIndicator, Banner, FAB, useTheme } from 'react-native-paper'
+import { Image } from 'expo-image'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useSelector, useDispatch } from 'react-redux'
 import { fetchState, deleteItem } from '@/modules/shared/store/sharedThunks'
 import { useOnline } from '@/sync/connectivity'
+import { selectIsPartner } from '@/modules/auth/roleSelectors'
 import { getErrorMessage } from '@/api/errors'
 import { useToast } from '@/modules/shared/components/Toast'
 import ConfirmDialog from '@/modules/shared/components/ConfirmDialog'
@@ -17,6 +19,7 @@ import RegisterBirthModal from '@/modules/livestock/components/RegisterBirthModa
 import WeanModal from '@/modules/livestock/components/WeanModal'
 import ReproductionEventsModal from '@/modules/livestock/components/ReproductionEventsModal'
 import GenealogyModal from '@/modules/livestock/components/GenealogyModal'
+import TreatmentFormModal from '@/modules/health/components/TreatmentFormModal'
 
 export default function AnimalListScreen({ navigation }) {
   const theme = useTheme()
@@ -26,6 +29,8 @@ export default function AnimalListScreen({ navigation }) {
   const online = useOnline()
   const animals = useSelector((s) => s.livestock.animals)
   const activeFarmId = useSelector((s) => (s.auth.user ? s.auth.user.active_farm : null))
+  // Socio: solo consulta sus animales asignados — sin FAB ni menú de acciones.
+  const isPartner = useSelector(selectIsPartner)
 
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
@@ -39,6 +44,7 @@ export default function AnimalListScreen({ navigation }) {
   const [events, setEvents] = useState({ visible: false, animalId: null })
   const [genealogy, setGenealogy] = useState({ visible: false, animal: null })
   const [weight, setWeight] = useState({ visible: false, animal: null })
+  const [treatment, setTreatment] = useState({ visible: false, animal: null })
   const [toDelete, setToDelete] = useState(null)
   const [deleting, setDeleting] = useState(false)
 
@@ -98,7 +104,13 @@ export default function AnimalListScreen({ navigation }) {
       <Card style={styles.card} mode="outlined" onPress={() => navigation.navigate('AnimalDetail', { id: item.id })}>
         <Card.Content style={styles.cardContent}>
           {thumb ? (
-            <Avatar.Image size={48} source={{ uri: thumb, headers: MEDIA_HEADERS }} />
+            // expo-image: caché en disco + decode al tamaño del avatar (no la foto entera)
+            <Image
+              source={{ uri: thumb, headers: MEDIA_HEADERS }}
+              style={styles.thumb}
+              contentFit="cover"
+              transition={100}
+            />
           ) : (
             <Avatar.Icon
               size={48}
@@ -127,6 +139,7 @@ export default function AnimalListScreen({ navigation }) {
               ) : null}
             </View>
           </View>
+          {isPartner ? null : (
           <AnimalActionsMenu
             animal={item}
             onDetail={(a) => navigation.navigate('AnimalDetail', { id: a.id })}
@@ -137,7 +150,9 @@ export default function AnimalListScreen({ navigation }) {
             onEvents={(a) => setEvents({ visible: true, animalId: a.id })}
             onGenealogy={(a) => setGenealogy({ visible: true, animal: a })}
             onWeight={(a) => setWeight({ visible: true, animal: a })}
+            onTreatment={(a) => setTreatment({ visible: true, animal: a })}
           />
+          )}
         </Card.Content>
       </Card>
     )
@@ -191,17 +206,23 @@ export default function AnimalListScreen({ navigation }) {
             <View style={styles.center}>
               <Avatar.Icon size={64} icon="cow-off" color={theme.colors.primary} style={{ backgroundColor: 'rgba(46,125,50,0.1)' }} />
               <Text variant="titleMedium" style={styles.emptyTitle}>
-                {search ? 'Sin coincidencias' : 'Tu hato está vacío'}
+                {search ? 'Sin coincidencias' : isPartner ? 'Aún no tienes animales asociados' : 'Tu hato está vacío'}
               </Text>
               <Text variant="bodyMedium" style={styles.muted}>
-                {search ? `Ningún animal coincide con «${search}».` : 'Registra tu primer animal con el botón +.'}
+                {search
+                  ? `Ningún animal coincide con «${search}».`
+                  : isPartner
+                    ? 'Cuando un administrador te asigne animales, aparecerán aquí.'
+                    : 'Registra tu primer animal con el botón +.'}
               </Text>
             </View>
           ) : null
         }
       />
 
-      <FAB icon="plus" label="Nuevo" style={[styles.fab, { bottom: 16 + insets.bottom }]} onPress={() => setForm({ visible: true, animal: null })} />
+      {isPartner ? null : (
+        <FAB icon="plus" label="Nuevo" style={[styles.fab, { bottom: 16 + insets.bottom }]} onPress={() => setForm({ visible: true, animal: null })} />
+      )}
 
       {/* Modals */}
       <AnimalFormModal
@@ -239,6 +260,12 @@ export default function AnimalListScreen({ navigation }) {
         onDismiss={() => setWeight({ visible: false, animal: null })}
         onSaved={({ animal: a, record }) => toast(`Peso de ${a.name} registrado: ${record.weight_kg} kg`)}
       />
+      <TreatmentFormModal
+        visible={treatment.visible}
+        animal={treatment.animal}
+        onDismiss={() => setTreatment({ visible: false, animal: null })}
+        onSaved={() => toast('Tratamiento creado')}
+      />
 
       <ConfirmDialog
         visible={!!toDelete}
@@ -269,4 +296,5 @@ const styles = StyleSheet.create({
   reproChip: { alignSelf: 'flex-start' },
   emptyTitle: { fontWeight: '700', marginTop: 8 },
   fab: { position: 'absolute', right: 16, bottom: 16 },
+  thumb: { width: 48, height: 48, borderRadius: 24, backgroundColor: 'rgba(46,125,50,0.06)' },
 })

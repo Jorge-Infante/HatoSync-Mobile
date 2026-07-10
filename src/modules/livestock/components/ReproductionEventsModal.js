@@ -94,7 +94,13 @@ export default function ReproductionEventsModal({ visible, animalId, onDismiss, 
     }
   }
 
-  const sortedEvents = [...events].sort((a, b) => (b.date || '').localeCompare(a.date || '') || b.id - a.id)
+  // events siempre array (el thunk normaliza); desempate por created_at, no por
+  // id (los id son UUID string desde la migración: `b.id - a.id` daba NaN).
+  const sortedEvents = (Array.isArray(events) ? [...events] : []).sort(
+    (a, b) =>
+      (b.date || '').localeCompare(a.date || '') ||
+      String(b.created_at || '').localeCompare(String(a.created_at || ''))
+  )
 
   return (
     <Portal>

@@ -5,6 +5,7 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { useDispatch } from 'react-redux'
 import { login } from '@/modules/auth/store/authSlice'
 import { getErrorMessage } from '@/api/errors'
+import BrandMark from '@/modules/shared/components/BrandMark'
 
 export default function LoginScreen() {
   const theme = useTheme()
@@ -49,12 +50,11 @@ export default function LoginScreen() {
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.brand}>
-            <View style={[styles.stamp, { borderColor: theme.colors.primary }]}>
-              <Text variant="headlineMedium" style={{ color: theme.colors.primary }}>
-                HS
-              </Text>
-            </View>
-            <Text variant="headlineLarge" style={[styles.title, { color: theme.colors.secondary }]}>
+            <BrandMark size={84} color={theme.colors.primary} ring />
+            <Text
+              variant="headlineLarge"
+              style={[styles.title, { color: theme.colors.secondary, fontFamily: 'Fraunces_600SemiBold' }]}
+            >
               HatoSync
             </Text>
             <Text variant="bodyMedium" style={{ color: theme.hs.palette.muted }}>
@@ -121,16 +121,8 @@ const styles = StyleSheet.create({
   flex: { flex: 1 },
   scroll: { flexGrow: 1, justifyContent: 'center', padding: 24, paddingBottom: 48 },
   brand: { alignItems: 'center', marginBottom: 40 },
-  stamp: {
-    width: 76,
-    height: 76,
-    borderRadius: 38,
-    borderWidth: 2,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 16,
-  },
-  title: { fontWeight: '700', marginBottom: 2 },
+  // Fraunces trae su propio peso (SemiBold); fontWeight extra lo distorsionaría
+  title: { marginTop: 16, marginBottom: 2 },
   form: { width: '100%' },
   field: { marginTop: 14 },
   error: { marginTop: 4 },

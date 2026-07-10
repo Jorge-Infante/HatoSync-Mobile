@@ -121,3 +121,43 @@ Solo cambias la URL del backend en **dos lugares** y recompilas:
 Con dominio + HTTPS real ya no haría falta el header de ngrok (es inofensivo dejarlo),
 y el backend debe quedar con `DEBUG=False`, `ALLOWED_HOSTS` específico y media servida
 por el servidor web.
+
+---
+
+## 6. APK local (sin la cola de EAS)
+
+En Windows `eas build --local` no existe; se compila con Gradle usando el JDK de
+Android Studio. Desde `HatoSync-Mobile\`:
+
+```powershell
+npx expo prebuild --platform android          # regenera android/ (tras cambiar app.json/plugins)
+# Junction a ruta corta (una sola vez; MAX_PATH, ver abajo):
+New-Item -ItemType Junction -Path C:\hs -Target 'C:\Users\Desarrollador\Documents\pinogano\HatoSync-Mobile'
+cd C:\hs\android
+$env:JAVA_HOME='C:\Program Files\Android\Android Studio\jbr'
+$env:ANDROID_HOME="$env:LOCALAPPDATA\Android\Sdk"
+$env:EXPO_PUBLIC_API_ORIGIN='http://161.97.74.149'   # ¡gana sobre el .env (ngrok)!
+.\gradlew assembleRelease
+# → android\app\build\outputs\apk\release\app-release.apk (~91 MB, universal)
+```
+
+Detalles que ya nos mordieron:
+- **MAX_PATH (260) en el paso C++/CMake**: "Filename longer than 260 characters" en los
+  `.o` de rnscreens/rnsvg/safeareacontext (el staging duplica la ruta absoluta del
+  fuente). Fix DOBLE ya aplicado/necesario: (1) compilar desde la junction `C:\hs`
+  (⚠ NO `subst X:` con el proyecto en la raíz de la unidad: expo-modules-autolinking
+  nunca encuentra `package.json` en la raíz de un drive) y (2) `buildStagingDirectory
+  "C:/hsx"` en el bloque `android.externalNativeBuild.cmake` de `android\app\build.gradle`
+  (prebuild lo regenera → re-añadirlo). Si queda un `.cxx` viejo con rutas largas,
+  borrarlo con robocopy /MIR desde una carpeta vacía.
+- **foojay 0.5.0 vs Gradle 9**: `node_modules\@react-native\gradle-plugin\settings.gradle.kts`
+  fija `foojay-resolver-convention 0.5.0`, que referencia `JvmVendorSpec.IBM_SEMERU`
+  (eliminado en Gradle 9) → "Class JvmVendorSpec does not have member field IBM_SEMERU".
+  Fix: subirlo a `1.0.0` en ese archivo. ⚠ `npm install` lo revierte — reaplicar (o
+  agregar patch-package si se vuelve rutina). En EAS no pasa porque su imagen ya trae
+  el JDK del toolchain y foojay nunca se activa.
+- **Firma distinta a EAS**: el APK local va firmado con el keystore debug del template,
+  NO con el de EAS. En un teléfono con la versión de EAS instalada hay que
+  **desinstalar antes** (se pierde la SQLite local: sincronizar pendientes primero).
+- La variable `EXPO_PUBLIC_API_ORIGIN` se incrusta al compilar el bundle dentro de
+  Gradle; si no se exporta, toma la del `.env` (ngrok).

@@ -6,7 +6,7 @@ import { Menu, IconButton, Divider } from 'react-native-paper'
  * Reproduction actions show only for females; "Destetar" is disabled without a
  * calf at side.
  */
-export default function AnimalActionsMenu({ animal, onDetail, onEdit, onDelete, onBirth, onWean, onEvents, onGenealogy, onWeight }) {
+export default function AnimalActionsMenu({ animal, onDetail, onEdit, onDelete, onBirth, onWean, onEvents, onGenealogy, onWeight, onTreatment }) {
   const [visible, setVisible] = useState(false)
   const isFemale = animal.sex === 'FEMALE'
   const hasCalf = Boolean(animal.reproduction && animal.reproduction.calf_at_side)
@@ -33,6 +33,7 @@ export default function AnimalActionsMenu({ animal, onDetail, onEdit, onDelete, 
           <Divider />
         </>
       ) : null}
+      <Menu.Item leadingIcon="medical-bag" title="Nuevo tratamiento" onPress={run(onTreatment)} />
       <Menu.Item leadingIcon="scale" title="Registrar peso" onPress={run(onWeight)} />
       <Menu.Item leadingIcon="family-tree" title="Genealogía" onPress={run(onGenealogy)} />
       <Menu.Item leadingIcon="pencil-outline" title="Editar" onPress={run(onEdit)} />

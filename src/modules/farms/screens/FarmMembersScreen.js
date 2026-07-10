@@ -231,4 +231,7 @@ const styles = StyleSheet.create({
   muted: { opacity: 0.7 },
   metaRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 6, flexWrap: 'wrap' },
   rowActions: { flexDirection: 'row' },
+  // Sin position absolute el FAB entra al flujo normal y se estira a todo el
+  // ancho de la pantalla — mismo estilo que el FAB de AnimalListScreen.
+  fab: { position: 'absolute', right: 16, bottom: 16 },
 })

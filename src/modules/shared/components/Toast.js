@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback } from 'react'
+import React, { createContext, useContext, useState, useCallback, useEffect } from 'react'
 import { Snackbar } from 'react-native-paper'
 import { useTheme } from 'react-native-paper'
 
@@ -6,8 +6,17 @@ import { useTheme } from 'react-native-paper'
  * App-wide toast (the RN equivalent of the per-page v-snackbar). Wrap the app in
  * <ToastProvider> and call const toast = useToast(); toast('Guardado') or
  * toast('Error', 'error').
+ *
+ * showGlobalToast() permite avisar desde código sin acceso a hooks (capa de
+ * conectividad, thunks). No-op si el provider aún no está montado.
  */
 const ToastContext = createContext(() => {})
+
+let globalToast = null
+
+export function showGlobalToast(text, color = 'success') {
+  if (globalToast) globalToast(text, color)
+}
 
 export function useToast() {
   return useContext(ToastContext)
@@ -20,6 +29,13 @@ export function ToastProvider({ children }) {
   const toast = useCallback((text, color = 'success') => {
     setState({ visible: true, text, color })
   }, [])
+
+  useEffect(() => {
+    globalToast = toast
+    return () => {
+      if (globalToast === toast) globalToast = null
+    }
+  }, [toast])
 
   const onDismiss = () => setState((s) => ({ ...s, visible: false }))
 

@@ -3,6 +3,7 @@ import authReducer from '@/modules/auth/store/authSlice'
 import farmsReducer from '@/modules/farms/store/farmsSlice'
 import livestockReducer from '@/modules/livestock/store/livestockSlice'
 import configurationReducer from '@/modules/configuration/store/configurationSlice'
+import healthReducer from '@/modules/health/store/healthSlice'
 
 /**
  * Root store — combines the namespaced module slices, mirroring the web's
@@ -15,6 +16,7 @@ const store = configureStore({
     farms: farmsReducer,
     livestock: livestockReducer,
     configuration: configurationReducer,
+    health: healthReducer,
   },
 })
 

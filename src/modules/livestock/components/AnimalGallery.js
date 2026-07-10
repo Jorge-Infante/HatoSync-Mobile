@@ -1,6 +1,9 @@
 import React, { useState } from 'react'
-import { View, StyleSheet, Image, ScrollView, Pressable, Dimensions } from 'react-native'
+import { View, StyleSheet, ScrollView, Pressable, Dimensions } from 'react-native'
 import { Portal, Modal, IconButton, Text, useTheme } from 'react-native-paper'
+// expo-image: caché en disco + decodificación al tamaño de la vista — las fotos
+// del backend cargan una sola vez por URL y luego salen del caché al instante.
+import { Image } from 'expo-image'
 import { mediaSource } from '@/utils/format'
 
 /**
@@ -30,7 +33,7 @@ export default function AnimalGallery({ photos = [], fallbackIcon = 'cow' }) {
   return (
     <View>
       <Pressable onPress={() => setLightbox(true)} style={[styles.main, { borderColor: theme.colors.outline }]}>
-        <Image source={current.source} style={styles.mainImg} resizeMode="cover" />
+        <Image source={current.source} style={styles.mainImg} contentFit="cover" transition={150} />
       </Pressable>
 
       {items.length > 1 ? (
@@ -41,7 +44,7 @@ export default function AnimalGallery({ photos = [], fallbackIcon = 'cow' }) {
               onPress={() => setActive(i)}
               style={[styles.thumb, i === active && { borderColor: theme.colors.primary }]}
             >
-              <Image source={item.source} style={styles.thumbImg} resizeMode="cover" />
+              <Image source={item.source} style={styles.thumbImg} contentFit="cover" transition={100} />
             </Pressable>
           ))}
         </ScrollView>
@@ -50,7 +53,7 @@ export default function AnimalGallery({ photos = [], fallbackIcon = 'cow' }) {
       <Portal>
         <Modal visible={lightbox} onDismiss={() => setLightbox(false)} contentContainerStyle={styles.lightbox}>
           <IconButton icon="close" iconColor="#fff" style={styles.lbClose} onPress={() => setLightbox(false)} />
-          <Image source={current.source} style={styles.lbImg} resizeMode="contain" />
+          <Image source={current.source} style={styles.lbImg} contentFit="contain" transition={150} />
           <View style={styles.lbBar}>
             <Text style={styles.lbCaption}>{current.caption || ''}</Text>
             <Text style={styles.lbCount}>

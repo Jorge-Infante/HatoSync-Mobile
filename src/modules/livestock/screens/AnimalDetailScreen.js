@@ -18,6 +18,7 @@ import { fetchState } from '@/modules/shared/store/sharedThunks'
 import { fetchAnimalFull, deleteWeight } from '@/modules/livestock/store/livestockThunks'
 import { getErrorMessage } from '@/api/errors'
 import { useToast } from '@/modules/shared/components/Toast'
+import { selectIsPartner } from '@/modules/auth/roleSelectors'
 import { reproStatusColor, eventMeta } from '@/modules/livestock/constants'
 import { formatDate, formatAge } from '@/utils/format'
 import AnimalGallery from '@/modules/livestock/components/AnimalGallery'
@@ -28,6 +29,7 @@ import ReproductionEventsModal from '@/modules/livestock/components/Reproduction
 import GenealogyModal from '@/modules/livestock/components/GenealogyModal'
 import WeightFormModal from '@/modules/livestock/components/WeightFormModal'
 import WeightChart from '@/modules/livestock/components/WeightChart'
+import HealthTimeline from '@/modules/health/components/HealthTimeline'
 import ConfirmDialog from '@/modules/shared/components/ConfirmDialog'
 
 // Comparativa de respaldo calculada client-side: los pesajes creados offline
@@ -58,6 +60,7 @@ export default function AnimalDetailScreen({ route, navigation }) {
   const toast = useToast()
   const animalId = route.params.id
   const herd = useSelector((s) => s.livestock.animals)
+  const isPartner = useSelector(selectIsPartner)
 
   const [animal, setAnimal] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -140,6 +143,7 @@ export default function AnimalDetailScreen({ route, navigation }) {
     ...(isFemale ? [{ value: 'repro', label: 'Reprod.' }] : []),
     { value: 'offspring', label: 'Descend.' },
     { value: 'peso', label: 'Peso' },
+    { value: 'salud', label: 'Sanidad' },
   ]
 
   return (
@@ -215,20 +219,22 @@ export default function AnimalDetailScreen({ route, navigation }) {
             </View>
           </View>
 
-          {/* Actions */}
+          {/* Actions — socio: solo consulta (queda únicamente la genealogía) */}
           <View style={styles.actions}>
-            <Button mode="contained-tonal" compact icon="pencil-outline" onPress={() => setEditVisible(true)}>
-              Editar
-            </Button>
+            {isPartner ? null : (
+              <Button mode="contained-tonal" compact icon="pencil-outline" onPress={() => setEditVisible(true)}>
+                Editar
+              </Button>
+            )}
             <Button mode="contained-tonal" compact icon="family-tree" onPress={() => setGenealogyVisible(true)}>
               Genealogía
             </Button>
-            {isFemale ? (
+            {isFemale && !isPartner ? (
               <Button mode="contained-tonal" compact icon="baby-bottle-outline" onPress={() => setBirthVisible(true)}>
                 Parto
               </Button>
             ) : null}
-            {isFemale ? (
+            {isFemale && !isPartner ? (
               <Button mode="contained-tonal" compact icon="link-variant-off" disabled={!repro.calf_at_side} onPress={() => setWeanVisible(true)}>
                 Destetar
               </Button>
@@ -262,6 +268,7 @@ export default function AnimalDetailScreen({ route, navigation }) {
               <Row label="Nacimiento" value={formatDate(animal.birth_date)} />
               <Row label="Edad" value={age} />
               <Row label="Raza" value={animal.breed_name || '—'} />
+              <Row label="Asignado a" value={animal.assigned_to_name || '—'} />
               <Row
                 label="Identificación"
                 value={(animal.identifications || []).length ? animal.identifications.map((id) => `${id.identification_type_name}: ${id.value}`).join('   ') : '—'}
@@ -283,9 +290,11 @@ export default function AnimalDetailScreen({ route, navigation }) {
               <Divider style={styles.divider} />
               <View style={styles.reproHeader}>
                 <Text variant="labelLarge">Historial</Text>
-                <Button mode="contained-tonal" compact icon="plus" onPress={() => setEventsVisible(true)}>
-                  Registrar evento
-                </Button>
+                {isPartner ? null : (
+                  <Button mode="contained-tonal" compact icon="plus" onPress={() => setEventsVisible(true)}>
+                    Registrar evento
+                  </Button>
+                )}
               </View>
               {events.length === 0 ? (
                 <Text variant="bodyMedium" style={styles.emptyInline}>
@@ -354,9 +363,11 @@ export default function AnimalDetailScreen({ route, navigation }) {
             <Card.Content>
               <View style={styles.reproHeader}>
                 <Text variant="labelLarge">Control de peso</Text>
-                <Button mode="contained-tonal" compact icon="plus" onPress={() => setWeightVisible(true)}>
-                  Registrar peso
-                </Button>
+                {isPartner ? null : (
+                  <Button mode="contained-tonal" compact icon="plus" onPress={() => setWeightVisible(true)}>
+                    Registrar peso
+                  </Button>
+                )}
               </View>
               {weights.length === 0 ? (
                 <Text variant="bodyMedium" style={styles.emptyInline}>
@@ -395,10 +406,20 @@ export default function AnimalDetailScreen({ route, navigation }) {
                         </Text>
                         {record.notes ? <Text variant="bodySmall">{record.notes}</Text> : null}
                       </View>
-                      <IconButton icon="delete-outline" size={18} iconColor={theme.colors.error} onPress={() => setWeightToDelete(record)} />
+                      {isPartner ? null : (
+                        <IconButton icon="delete-outline" size={18} iconColor={theme.colors.error} onPress={() => setWeightToDelete(record)} />
+                      )}
                     </View>
                   )
                 })}
+            </Card.Content>
+          </Card>
+        ) : null}
+
+        {tab === 'salud' ? (
+          <Card mode="outlined" style={styles.tabCard}>
+            <Card.Content>
+              <HealthTimeline animal={animal} canWrite={!isPartner} onChanged={load} />
             </Card.Content>
           </Card>
         ) : null}

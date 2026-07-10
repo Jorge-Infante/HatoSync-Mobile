@@ -6,7 +6,7 @@ import { createCrudSlice } from '@/modules/shared/store/createCrudSlice'
  * module: 'configuration', nameState: 'breeds' | 'identificationTypes'.
  */
 const configurationSlice = createCrudSlice('configuration', {
-  initialState: { breeds: [], identificationTypes: [] },
+  initialState: { breeds: [], identificationTypes: [], medications: [] },
 })
 
 export default configurationSlice.reducer

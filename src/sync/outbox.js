@@ -1,7 +1,8 @@
 import apiClient from '@/api/client'
 import { getDb } from '@/db'
 import { crudRegistry } from '@/modules/shared/store/createCrudSlice'
-import { cacheUpsertItem, cacheDeleteItem } from '@/db/repositories'
+import { cacheUpsertItem, cacheDeleteItem, cacheUpsertPhoto } from '@/db/repositories'
+import { deleteOutboxPhoto } from '@/sync/photoStore'
 
 /**
  * Outbox — the offline write queue. Every offline mutation is appended here and
@@ -70,6 +71,23 @@ export async function flushOutbox(store) {
         if (item.method === 'POST') res = await apiClient.post(item.url, body)
         else if (item.method === 'PATCH') res = await apiClient.patch(item.url, body)
         else if (item.method === 'DELETE') await apiClient.delete(item.url)
+        else if (item.method === 'UPLOAD') {
+          // Foto encolada offline (Fase 3): multipart con la copia local
+          // persistente. El `id` de cliente hace el POST idempotente.
+          const formData = new FormData()
+          if (body.id) formData.append('id', body.id)
+          if (body.caption) formData.append('caption', body.caption)
+          formData.append(body.field || 'image', body.file)
+          res = await apiClient.post(item.url, formData, {
+            headers: { 'Content-Type': 'multipart/form-data' },
+          })
+          // Reconciliar el cache de fotos (URI local → URL del servidor) y
+          // soltar la copia local: ya vive en el backend.
+          if (res && res.data && body.animalId) {
+            await cacheUpsertPhoto(body.animalId, res.data).catch(() => {})
+          }
+          await deleteOutboxPhoto(body.file && body.file.uri)
+        }
 
         // Reconcile Redux + cache with the canonical server object (same UUID,
         // so UPDATE_ITEM replaces the optimistic row in place).

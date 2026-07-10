@@ -35,6 +35,25 @@ export function todayISO() {
   return new Date().toISOString().slice(0, 10)
 }
 
+// Formato manual (NO Intl): Hermes en Android ignora las opciones de
+// toLocaleString/toLocaleDateString y devuelve formatos degradados (sin día,
+// con "a. m."). Estos helpers garantizan el mismo resultado en todos lados.
+const MONTHS_SHORT = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic']
+
+// ISO datetime → "07:45" (24h)
+export function formatTime(value) {
+  if (!value) return ''
+  const d = new Date(value)
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+}
+
+// ISO datetime → "9 jul 2026, 07:45"
+export function formatDateTimeFull(value) {
+  if (!value) return '—'
+  const d = new Date(value)
+  return `${d.getDate()} ${MONTHS_SHORT[d.getMonth()]} ${d.getFullYear()}, ${formatTime(value)}`
+}
+
 // Header that tells ngrok (free tier) to skip its browser-warning interstitial.
 // The native <Image> loader doesn't go through the axios client, so remote
 // images must carry this header themselves or ngrok returns an HTML page.
@@ -46,6 +65,8 @@ export const MEDIA_HEADERS = { 'ngrok-skip-browser-warning': 'true' }
 // a localhost/http URL.
 export function mediaUrl(url) {
   if (!url) return null
+  // Foto local pendiente de subir (offline Fase 3): se muestra tal cual.
+  if (url.startsWith('file:')) return url
   if (url.startsWith('http')) {
     const idx = url.indexOf('/media/')
     return idx !== -1 ? `${API_ORIGIN}${url.slice(idx)}` : url
