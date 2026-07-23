@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { View, StyleSheet, Pressable, ScrollView } from 'react-native'
 import { Image } from 'expo-image'
-import { TextInput, Text, HelperText, IconButton, ActivityIndicator, Checkbox, Chip, useTheme } from 'react-native-paper'
+import { TextInput, Text, HelperText, IconButton, ActivityIndicator, Checkbox, Chip, Switch, Divider, useTheme } from 'react-native-paper'
 import { useSelector, useDispatch } from 'react-redux'
 import * as ImagePicker from 'expo-image-picker'
 // /legacy: en SDK 56 la API de funciones (createAssetAsync, getAlbumAsync...)
@@ -13,7 +13,7 @@ import { useToast } from '@/modules/shared/components/Toast'
 import DateField from '@/modules/shared/components/DateField'
 import PickerField from '@/modules/shared/components/PickerField'
 import { createItem, updateItem, fetchState } from '@/modules/shared/store/sharedThunks'
-import { syncAnimalPhotos } from '@/modules/livestock/store/livestockThunks'
+import { syncAnimalPhotos, createReproductionEvent } from '@/modules/livestock/store/livestockThunks'
 import { SEX_OPTIONS } from '@/modules/livestock/constants'
 import { selectIsFarmAdmin } from '@/modules/auth/roleSelectors'
 import { mediaSource, todayISO } from '@/utils/format'
@@ -21,8 +21,7 @@ import { getErrorMessage } from '@/api/errors'
 
 let photoSeq = 0
 
-// Álbum en la galería del teléfono (como el de WhatsApp): las fotos tomadas
-// desde la app quedan también ahí, no solo adjuntas al animal.
+// Carpeta propia en la galería del teléfono para las fotos tomadas desde la app.
 const DEVICE_ALBUM = 'HatoSync'
 
 // Lado máximo con el que una foto viaja al servidor. Las fotos de cámara salen
@@ -54,15 +53,22 @@ async function optimizeForUpload(asset) {
   }
 }
 
-export default function AnimalFormModal({ visible, animal, onDismiss, onSaved }) {
+// birthMother: si viene, el modal registra un PARTO de esa madre — el formulario
+// completo de la cría (madre fija, padre/fecha editables, toggle "nació viva" al
+// final). Crea la cría completa + el evento BIRTH que la referencia (descompuesto,
+// igual online y offline). Espejo del modo parto de AnimalFormDialog.vue.
+// prefill (solo en create): precarga campos, p. ej. { lot } desde la vista de un lote.
+export default function AnimalFormModal({ visible, animal, birthMother, prefill, onDismiss, onSaved }) {
   const theme = useTheme()
   const dispatch = useDispatch()
   const toast = useToast()
   const isEdit = !!animal
+  const isBirth = !!birthMother && !animal
 
   const animals = useSelector((s) => s.livestock.animals)
   const externalAnimals = useSelector((s) => s.livestock.externals)
   const breeds = useSelector((s) => s.configuration.breeds.filter((b) => b.is_active))
+  const lots = useSelector((s) => s.configuration.lots.filter((l) => l.is_active))
   const idTypes = useSelector((s) => s.configuration.identificationTypes.filter((t) => t.is_active))
   // Asignación a un miembro (regla del socio): solo la maneja un admin.
   // Fuente = la lista VIVA de /farms/members/ (se refresca al abrir el modal);
@@ -91,7 +97,11 @@ export default function AnimalFormModal({ visible, animal, onDismiss, onSaved })
   const [mother, setMother] = useState(null)
   const [father, setFather] = useState(null)
   const [breed, setBreed] = useState(null)
+  const [lot, setLot] = useState(null)
   const [assignedTo, setAssignedTo] = useState(null)
+  // Modo parto: si la cría nació viva (si no, solo se registra el evento BIRTH).
+  const [bornAlive, setBornAlive] = useState(true)
+  const [birthNotes, setBirthNotes] = useState('')
   const [idValues, setIdValues] = useState({})
   const [newPhotos, setNewPhotos] = useState([])
   const [existingPhotos, setExistingPhotos] = useState([])
@@ -99,17 +109,25 @@ export default function AnimalFormModal({ visible, animal, onDismiss, onSaved })
   const [catalogsLoading, setCatalogsLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  // Assets de galería tomados en esta sesión, pendientes de moverse a la carpeta
+  // "HatoSync" EN LOTE al guardar (1 solo aviso del sistema, no uno por foto).
+  const pendingAlbumAssets = useRef([])
 
   useEffect(() => {
     if (!visible) return
+    pendingAlbumAssets.current = []
     setName(animal?.name || '')
     setExternal(animal ? !!animal.is_external : false)
     setSex(animal?.sex || null)
-    setBirthDate(animal?.birth_date || '')
-    setMother(animal?.mother || null)
+    // Parto: la fecha por defecto es hoy y la madre queda fija (viene de la acción).
+    setBirthDate(animal?.birth_date || (isBirth ? todayISO() : ''))
+    setMother(animal?.mother || (isBirth ? birthMother.id : null))
     setFather(animal?.father || null)
     setBreed(animal?.breed || null)
+    setLot(animal?.lot || (!animal && prefill?.lot) || null)
     setAssignedTo(animal?.assigned_to || null)
+    setBornAlive(true)
+    setBirthNotes('')
     const ids = {}
     if (animal && Array.isArray(animal.identifications)) {
       animal.identifications.forEach((id) => {
@@ -135,6 +153,7 @@ export default function AnimalFormModal({ visible, animal, onDismiss, onSaved })
       const requests = [
         dispatch(fetchState({ module: 'configuration', nameState: 'breeds', url: '/configuration/breeds/' })),
         dispatch(fetchState({ module: 'configuration', nameState: 'identificationTypes', url: '/configuration/identification-types/' })),
+        dispatch(fetchState({ module: 'configuration', nameState: 'lots', url: '/configuration/lots/' })),
       ]
       if (isFarmAdmin) {
         // Miembros frescos para "Asignado a" (endpoint admin-only). Si falla
@@ -150,11 +169,10 @@ export default function AnimalFormModal({ visible, animal, onDismiss, onSaved })
   }
 
   async function pickImages() {
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync()
-    if (!perm.granted) {
-      setError('Se necesita permiso para acceder a las fotos')
-      return
-    }
+    // SIN pedir permiso: launchImageLibraryAsync usa el Photo Picker del
+    // sistema (Android 11+/iOS PHPicker), que no requiere permiso de galería.
+    // Pedirlo aquí era una de las causas del "permitir y permitir": en
+    // Android 14 con acceso parcial el sistema re-mostraba el diálogo SIEMPRE.
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
       allowsMultipleSelection: true,
@@ -168,11 +186,14 @@ export default function AnimalFormModal({ visible, animal, onDismiss, onSaved })
   }
 
   // Tomar la foto sin salir del formulario: queda adjunta al animal Y guardada
-  // en el álbum HatoSync de la galería del teléfono.
+  // en la galería del teléfono.
   async function takePhoto() {
-    const perm = await ImagePicker.requestCameraPermissionsAsync()
+    // Consultar primero (sin diálogo) y pedir solo si nunca se ha concedido:
+    // el permiso se pide UNA vez, como WhatsApp.
+    let perm = await ImagePicker.getCameraPermissionsAsync()
+    if (!perm.granted && perm.canAskAgain) perm = await ImagePicker.requestCameraPermissionsAsync()
     if (!perm.granted) {
-      setError('Se necesita permiso para usar la cámara')
+      setError('Se necesita permiso para usar la cámara. Actívalo en Ajustes > Aplicaciones > HatoSync.')
       return
     }
     // quality 1: la captura queda intacta — la galería del teléfono recibe la
@@ -185,51 +206,77 @@ export default function AnimalFormModal({ visible, animal, onDismiss, onSaved })
     setNewPhotos((prev) => [...prev, { key: `n${photoSeq++}`, ...optimized }])
   }
 
-  // Mete el asset a la carpeta HatoSync (moviendo; si el scoped storage de ese
-  // Android no deja mover, copiando).
-  async function addToAlbum(asset, copy) {
-    const album = await MediaLibrary.getAlbumAsync(DEVICE_ALBUM)
-    if (album) await MediaLibrary.addAssetsToAlbumAsync([asset], album, copy)
-    else await MediaLibrary.createAlbumAsync(DEVICE_ALBUM, asset, copy)
+  // Permiso de galería pedido UNA sola vez (estilo WhatsApp). El bug del
+  // "permitir y permitir": llamar requestPermissionsAsync en CADA foto — con
+  // acceso parcial de Android 14 ("Seleccionar fotos") el sistema re-muestra
+  // el selector en cada request aunque ya haya acceso. La regla: consultar
+  // primero con getPermissionsAsync (nunca abre diálogo) y pedir solo si
+  // realmente falta; 'limited' cuenta como concedido.
+  async function ensureGalleryPermission() {
+    const usable = (p) => p && (p.granted || p.accessPrivileges === 'limited')
+    let perm
+    try {
+      perm = await MediaLibrary.getPermissionsAsync(false, ['photo'])
+    } catch {
+      perm = await MediaLibrary.getPermissionsAsync().catch(() => null)
+    }
+    if (usable(perm)) return true
+    if (perm && !perm.canAskAgain) return false // denegado permanente: no insistir
+    // Pedir SOLO el permiso de fotos: sin granularPermissions, en Android 13+
+    // se piden también video y audio, y si alguno no está declarado en el
+    // manifest la llamada LANZA en vez de mostrar el diálogo.
+    try {
+      perm = await MediaLibrary.requestPermissionsAsync(false, ['photo'])
+    } catch {
+      perm = await MediaLibrary.requestPermissionsAsync().catch(() => null)
+    }
+    return usable(perm)
   }
 
+  // Al capturar: crea el asset en la galería (createAssetAsync NO pide permiso de
+  // "modificar") y lo ACUMULA. El movimiento a la carpeta "HatoSync" —que SÍ pide
+  // el permiso del sistema en Android 11+— se hace EN LOTE al guardar el animal
+  // (flushAlbumAssets), así el aviso sale UNA vez por guardado y no una por foto.
   async function saveToDeviceAlbum(uri) {
     try {
-      // Pedir SOLO el permiso de fotos: sin granularPermissions, en Android 13+
-      // se piden también video y audio, y si alguno no está declarado en el
-      // manifest la llamada LANZA en vez de mostrar el diálogo.
-      let perm
-      try {
-        perm = await MediaLibrary.requestPermissionsAsync(false, ['photo'])
-      } catch {
-        perm = await MediaLibrary.requestPermissionsAsync()
-      }
-      if (!perm.granted) {
+      if (!(await ensureGalleryPermission())) {
         toast('Sin permiso de galería: la foto quedó solo en el animal', 'error')
         return
       }
-      let asset
-      try {
-        asset = await MediaLibrary.createAssetAsync(uri) // ya está en la galería
-      } catch {
-        // Plan B: a la galería aunque sea sin carpeta propia
-        await MediaLibrary.saveToLibraryAsync(uri)
-        toast('Foto guardada en la galería (sin carpeta HatoSync)')
-        return
-      }
-      try {
-        try {
-          await addToAlbum(asset, false)
-        } catch {
-          await addToAlbum(asset, true)
-        }
-        toast(`Foto guardada en la carpeta ${DEVICE_ALBUM} de tu galería`)
-      } catch {
-        toast(`Foto en la galería, pero no se pudo crear la carpeta ${DEVICE_ALBUM}`, 'error')
-      }
+      const asset = await MediaLibrary.createAssetAsync(uri) // guarda en galería, sin prompt
+      pendingAlbumAssets.current.push(asset)
     } catch (e) {
-      // El detalle del error en pantalla: si vuelve a fallar, sabremos exactamente dónde
       toast(`No se pudo guardar en la galería: ${(e && e.message) || e}`, 'error')
+    }
+  }
+
+  // Mueve TODAS las fotos de la sesión a la carpeta "HatoSync" en un solo paso
+  // (un único aviso del sistema). Debe AWAITearse ANTES de cerrar el formulario:
+  // el movimiento en Android 11+ abre un diálogo del sistema (createWriteRequest)
+  // que necesita la Activity estable; si se dispara mientras la pantalla navega,
+  // falla en silencio y la foto se queda en DCIM. El resultado se avisa por toast
+  // (incluye el error real) para no fallar mudo.
+  async function flushAlbumAssets() {
+    const assets = pendingAlbumAssets.current
+    pendingAlbumAssets.current = []
+    if (!assets.length) return
+    try {
+      if (!(await ensureGalleryPermission())) return
+      let album = await MediaLibrary.getAlbumAsync(DEVICE_ALBUM)
+      if (album) {
+        await MediaLibrary.addAssetsToAlbumAsync(assets, album, false)
+      } else {
+        // Primera vez: crear la carpeta con la 1ª foto y agregar el resto.
+        await MediaLibrary.createAlbumAsync(DEVICE_ALBUM, assets[0], false)
+        if (assets.length > 1) {
+          album = await MediaLibrary.getAlbumAsync(DEVICE_ALBUM)
+          if (album) await MediaLibrary.addAssetsToAlbumAsync(assets.slice(1), album, false)
+        }
+      }
+      toast(`Foto(s) guardada(s) en la carpeta ${DEVICE_ALBUM}`)
+    } catch (e) {
+      // Rechazó mover / scoped storage: quedan en la galería general.
+      toast(`Fotos en tu galería (no en carpeta ${DEVICE_ALBUM}): ${(e && e.message) || e}`, 'error')
     }
   }
 
@@ -250,11 +297,13 @@ export default function AnimalFormModal({ visible, animal, onDismiss, onSaved })
     if (birthDate) payload.birth_date = birthDate
     if (isEdit) {
       payload.breed = breed
+      payload.lot = lot
     } else {
       if (breed != null) payload.breed = breed
+      if (lot != null) payload.lot = lot
       if (payload.mother === null) delete payload.mother
       if (payload.father === null) delete payload.father
-      if (external) payload.is_external = true
+      if (external && !isBirth) payload.is_external = true
     }
     if (idTypes.length) {
       const ids = idTypes
@@ -271,7 +320,52 @@ export default function AnimalFormModal({ visible, animal, onDismiss, onSaved })
     return payload
   }
 
+  // Parto: crea la cría completa (si nació viva) y SIEMPRE el evento BIRTH en la
+  // madre. Descompuesto (animal + evento) — funciona igual online y offline.
+  async function submitBirth() {
+    if (!birthDate) return setError('La fecha del parto es requerida')
+    if (bornAlive) {
+      if (!name.trim()) return setError('El nombre de la cría es requerido')
+      if (!sex) return setError('El sexo de la cría es requerido')
+    }
+    setSaving(true)
+    setError('')
+    try {
+      const eventData = { event_type: 'BIRTH', date: birthDate }
+      if (father) eventData.sire = father
+      if (birthNotes.trim()) eventData.notes = birthNotes.trim()
+
+      let calf = null
+      if (bornAlive) {
+        calf = await dispatch(createItem({ module: 'livestock', nameState: 'animals', url: '/livestock/animals/', data: buildPayload() }))
+        if (newPhotos.length) {
+          const photoResult = await dispatch(
+            syncAnimalPhotos({
+              animalId: calf.id,
+              newFiles: newPhotos.map((p) => ({ uri: p.uri, name: p.name, type: p.type })),
+              removedIds: [],
+            })
+          )
+          if (photoResult && photoResult.queued) {
+            toast(`${photoResult.queued} foto(s) quedan por subir; se enviarán al volver la señal`)
+          }
+        }
+        eventData.offspring = calf.id
+      }
+      await dispatch(createReproductionEvent({ animalId: birthMother.id, data: eventData }))
+
+      await flushAlbumAssets() // mover fotos a la carpeta HatoSync (1 aviso) con la Activity estable
+      onSaved && onSaved({ isEdit: false, birth: true, calfName: bornAlive ? name.trim() : null })
+      onDismiss()
+    } catch (e) {
+      setError(getErrorMessage(e, 'No se pudo registrar el parto'))
+    } finally {
+      setSaving(false)
+    }
+  }
+
   async function submit() {
+    if (isBirth) return submitBirth()
     if (!name.trim()) return setError('El nombre es requerido')
     if (!sex) return setError('El sexo es requerido')
     setSaving(true)
@@ -296,6 +390,7 @@ export default function AnimalFormModal({ visible, animal, onDismiss, onSaved })
           toast(`${photoResult.queued} foto(s) quedan por subir; se enviarán al volver la señal`)
         }
       }
+      await flushAlbumAssets() // mover fotos a la carpeta HatoSync (1 aviso) con la Activity estable
       onSaved && onSaved({ isEdit })
       onDismiss()
     } catch (e) {
@@ -306,19 +401,25 @@ export default function AnimalFormModal({ visible, animal, onDismiss, onSaved })
   }
 
   const allPhotos = [...existingPhotos, ...newPhotos]
+  // En modo parto los campos de la cría solo aplican si nació viva.
+  const showAnimalFields = !isBirth || bornAlive
 
   return (
     <FormModal
       visible={visible}
       onDismiss={onDismiss}
-      title={isEdit ? 'Editar animal' : 'Nuevo animal'}
-      icon={isEdit ? 'pencil-outline' : 'plus'}
+      title={isBirth ? 'Registrar parto' : isEdit ? 'Editar animal' : 'Nuevo animal'}
+      icon={isBirth ? 'baby-bottle-outline' : isEdit ? 'pencil-outline' : 'plus'}
       onSubmit={submit}
-      submitLabel={isEdit ? 'Guardar cambios' : 'Registrar animal'}
+      submitLabel={isBirth ? 'Registrar parto' : isEdit ? 'Guardar cambios' : 'Registrar animal'}
       loading={saving}
     >
       {error ? <HelperText type="error" visible>{error}</HelperText> : null}
-      {!isEdit ? (
+      {isBirth ? (
+        <Chip icon="cow" compact style={styles.externalChip}>
+          Madre: {birthMother.name}
+        </Chip>
+      ) : !isEdit ? (
         <Text variant="bodySmall" style={styles.hint}>
           Entrada de inventario: compras o carga del hato inicial. Los nacimientos se registran desde la madre con el parto.
         </Text>
@@ -329,9 +430,12 @@ export default function AnimalFormModal({ visible, animal, onDismiss, onSaved })
       ) : null}
 
       {/* Photos */}
+      {showAnimalFields ? (
       <Text variant="labelSmall" style={styles.overline}>
         FOTOS
       </Text>
+      ) : null}
+      {showAnimalFields ? (
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.photoStrip}>
         {/* Acciones SIEMPRE fijas en las dos primeras posiciones; las fotos
             se van acomodando a la derecha */}
@@ -366,11 +470,25 @@ export default function AnimalFormModal({ visible, animal, onDismiss, onSaved })
           </View>
         ))}
       </ScrollView>
+      ) : null}
 
       {/* Fields */}
-      <TextInput mode="outlined" label="Nombre *" value={name} onChangeText={setName} left={<TextInput.Icon icon="tag-outline" />} style={styles.field} />
-      <PickerField label="Sexo *" value={sex} options={SEX_OPTIONS} onChange={setSex} style={styles.field} />
-      <DateField label="Fecha de nacimiento" value={birthDate} onChange={setBirthDate} max={todayISO()} helperText="Si se omite, se usa hoy" style={styles.field} />
+      {showAnimalFields ? (
+        <>
+          <TextInput mode="outlined" label={isBirth ? 'Nombre de la cría *' : 'Nombre *'} value={name} onChangeText={setName} left={<TextInput.Icon icon="tag-outline" />} style={styles.field} />
+          <PickerField label="Sexo *" value={sex} options={SEX_OPTIONS} onChange={setSex} style={styles.field} />
+        </>
+      ) : null}
+      <DateField
+        label={isBirth ? 'Fecha del parto *' : 'Fecha de nacimiento'}
+        value={birthDate}
+        onChange={setBirthDate}
+        max={todayISO()}
+        helperText={isBirth ? undefined : 'Si se omite, se usa hoy'}
+        style={styles.field}
+      />
+      {/* Madre: en modo parto es fija (viene de la acción) → se oculta el picker */}
+      {!isBirth ? (
       <PickerField
         label="Madre (opcional)"
         value={mother}
@@ -384,8 +502,9 @@ export default function AnimalFormModal({ visible, animal, onDismiss, onSaved })
         noDataText="No hay hembras registradas"
         style={styles.field}
       />
+      ) : null}
       <PickerField
-        label="Padre (opcional)"
+        label={isBirth ? 'Padre / Toro (opcional)' : 'Padre (opcional)'}
         value={father}
         options={[
           ...males.map((a) => ({ label: a.name, value: a.id })),
@@ -407,11 +526,15 @@ export default function AnimalFormModal({ visible, animal, onDismiss, onSaved })
         </View>
       ) : null}
 
-      {breeds.length ? (
+      {showAnimalFields && breeds.length ? (
         <PickerField label="Raza (opcional)" value={breed} options={breeds.map((b) => ({ label: b.name, value: b.id }))} onChange={setBreed} clearable style={styles.field} />
       ) : null}
 
-      {isFarmAdmin && memberOptions.length ? (
+      {showAnimalFields && lots.length ? (
+        <PickerField label="Lote (opcional)" value={lot} options={lots.map((l) => ({ label: l.name, value: l.id }))} onChange={setLot} clearable style={styles.field} />
+      ) : null}
+
+      {showAnimalFields && isFarmAdmin && memberOptions.length ? (
         <PickerField
           label="Asignado a (opcional)"
           value={assignedTo}
@@ -423,7 +546,7 @@ export default function AnimalFormModal({ visible, animal, onDismiss, onSaved })
         />
       ) : null}
 
-      {idTypes.length ? (
+      {showAnimalFields && idTypes.length ? (
         <>
           <Text variant="labelSmall" style={styles.overline}>
             IDENTIFICACIÓN
@@ -444,7 +567,7 @@ export default function AnimalFormModal({ visible, animal, onDismiss, onSaved })
       ) : null}
 
       {/* External genetics: at the end of the form, right above the actions */}
-      {!isEdit ? (
+      {!isEdit && !isBirth ? (
         <>
           <Checkbox.Item
             label="Genética externa"
@@ -459,6 +582,31 @@ export default function AnimalFormModal({ visible, animal, onDismiss, onSaved })
               Pajilla de semen o toro/vaca que no es tuyo: se usa como padre o madre en la genealogía, pero no aparecerá en el hato.
             </Text>
           ) : null}
+        </>
+      ) : null}
+
+      {/* Modo parto: toggle "nació viva" + notas del parto, al final del form */}
+      {isBirth ? (
+        <>
+          <Divider style={styles.birthDivider} />
+          <View style={styles.switchRow}>
+            <Text variant="bodyMedium">La cría nació viva</Text>
+            <Switch value={bornAlive} onValueChange={setBornAlive} />
+          </View>
+          <Text variant="bodySmall" style={styles.hint}>
+            {bornAlive
+              ? 'Completa los datos de la cría arriba; queda enlazada a la madre y a la fecha del parto (sin volver a editar).'
+              : 'Se registrará el parto sin cría (mortinato); no se creará un animal.'}
+          </Text>
+          <TextInput
+            mode="outlined"
+            label="Notas del parto (opcional)"
+            value={birthNotes}
+            onChangeText={setBirthNotes}
+            multiline
+            numberOfLines={2}
+            style={styles.field}
+          />
         </>
       ) : null}
     </FormModal>
@@ -481,4 +629,6 @@ const styles = StyleSheet.create({
   tileIcon: { margin: 0 },
   tileLabel: { marginTop: -4, fontWeight: '600' },
   catalogLoading: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8 },
+  birthDivider: { marginVertical: 10 },
+  switchRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 },
 })

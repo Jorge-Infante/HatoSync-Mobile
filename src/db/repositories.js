@@ -1,5 +1,6 @@
 import { getDb } from './index'
 import { clearOutboxPhotos } from '@/sync/photoStore'
+import { clearMediaCache } from '@/sync/mediaCache'
 
 const sid = (v) => (v == null ? null : String(v))
 const parse = (rows) => rows.map((r) => JSON.parse(r.data))
@@ -82,7 +83,44 @@ async function replaceScoped(table, farmId, list) {
 
 export const saveBreeds = (farmId, list) => replaceScoped('breeds', farmId, list)
 export const saveIdentificationTypes = (farmId, list) => replaceScoped('identification_types', farmId, list)
+export const saveLots = (farmId, list) => replaceScoped('lots', farmId, list)
+export const saveSchedules = (farmId, list) => replaceScoped('schedules', farmId, list)
 export const saveMembers = (farmId, list) => replaceScoped('farm_members', farmId, list)
+export const saveInactivationReasons = (farmId, list) => replaceScoped('inactivation_reasons', farmId, list)
+
+// Chapetas QR: snapshot completo de la finca (el resolve offline busca por código).
+export async function saveTags(farmId, list) {
+  const db = await getDb()
+  await db.withTransactionAsync(async () => {
+    await db.runAsync('DELETE FROM tags WHERE farm_id = ?', [sid(farmId)])
+    for (const t of list) {
+      await db.runAsync(
+        'INSERT OR REPLACE INTO tags (id, farm_id, code, status, animal_id, data) VALUES (?,?,?,?,?,?)',
+        [sid(t.id), sid(farmId), t.code ?? '', t.status ?? '', sid(t.animal), JSON.stringify(t)]
+      )
+    }
+  })
+}
+
+export async function cacheUpsertTag(farmId, tag) {
+  const db = await getDb()
+  await db.runAsync(
+    'INSERT OR REPLACE INTO tags (id, farm_id, code, status, animal_id, data) VALUES (?,?,?,?,?,?)',
+    [sid(tag.id), sid(farmId), tag.code ?? '', tag.status ?? '', sid(tag.animal), JSON.stringify(tag)]
+  )
+}
+
+export async function getTagByCode(code) {
+  const db = await getDb()
+  const row = await db.getFirstAsync('SELECT data FROM tags WHERE code = ?', [String(code)])
+  return row ? JSON.parse(row.data) : null
+}
+
+export async function getTagByAnimal(animalId) {
+  const db = await getDb()
+  const row = await db.getFirstAsync("SELECT data FROM tags WHERE animal_id = ? AND status = 'ASSIGNED'", [sid(animalId)])
+  return row ? JSON.parse(row.data) : null
+}
 
 export async function saveFarms(list) {
   const db = await getDb()
@@ -106,6 +144,10 @@ export async function clearLocalData() {
     'weight_records',
     'breeds',
     'identification_types',
+    'lots',
+    'schedules',
+    'inactivation_reasons',
+    'tags',
     'farms',
     'farm_members',
     'outbox',
@@ -116,6 +158,20 @@ export async function clearLocalData() {
   })
   // La outbox se fue con la cuenta anterior → sus copias de fotos también.
   await clearOutboxPhotos()
+  // Y las fotos descargadas para offline (no deben quedar de la cuenta anterior).
+  await clearMediaCache()
+}
+
+// Apunta el primary_photo de la fila lean del animal a una uri local (file://),
+// para que la MINIATURA del listado también se vea offline. La foto ya se
+// descargó a la caché local durante el pull.
+export async function setAnimalPrimaryPhotoLocal(id, localUri) {
+  const db = await getDb()
+  const row = await db.getFirstAsync('SELECT data FROM animals WHERE id = ?', [sid(id)])
+  if (!row) return
+  const data = JSON.parse(row.data)
+  data.primary_photo = localUri
+  await db.runAsync('UPDATE animals SET data = ? WHERE id = ?', [JSON.stringify(data), sid(id)])
 }
 
 // --- Reads (hydration / offline queries) -----------------------------------
@@ -128,6 +184,9 @@ export async function getAnimals(farmId) {
 
 export const getBreeds = async (farmId) => parse(await (await getDb()).getAllAsync('SELECT data FROM breeds WHERE farm_id = ?', [sid(farmId)]))
 export const getIdentificationTypes = async (farmId) => parse(await (await getDb()).getAllAsync('SELECT data FROM identification_types WHERE farm_id = ?', [sid(farmId)]))
+export const getLots = async (farmId) => parse(await (await getDb()).getAllAsync('SELECT data FROM lots WHERE farm_id = ?', [sid(farmId)]))
+export const getInactivationReasons = async (farmId) => parse(await (await getDb()).getAllAsync('SELECT data FROM inactivation_reasons WHERE farm_id = ?', [sid(farmId)]))
+export const getSchedules = async (farmId) => parse(await (await getDb()).getAllAsync('SELECT data FROM schedules WHERE farm_id = ?', [sid(farmId)]))
 export const getFarms = async () => parse(await (await getDb()).getAllAsync('SELECT data FROM farms'))
 export const getMembers = async (farmId) => parse(await (await getDb()).getAllAsync('SELECT data FROM farm_members WHERE farm_id = ?', [sid(farmId)]))
 
@@ -222,6 +281,9 @@ export async function getPendingFullIds(farmId) {
 const SCOPED_TABLE = {
   'configuration/breeds': 'breeds',
   'configuration/identificationTypes': 'identification_types',
+  'configuration/lots': 'lots',
+  'configuration/inactivationReasons': 'inactivation_reasons',
+  'health/schedules': 'schedules',
   'farms/members': 'farm_members',
 }
 

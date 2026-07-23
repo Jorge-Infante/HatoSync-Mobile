@@ -83,6 +83,61 @@ Mientras alguien prueba el APK, en tu PC deben estar arriba **Django + ngrok**
 El perfil de build está en `eas.json` → `preview` (genera `.apk`, no `.aab`) y ahí
 también está la `EXPO_PUBLIC_API_ORIGIN` que se incrusta en el APK.
 
+> ⚠ `google-services.json` está gitignored: EAS lo recibe por la env var de
+> archivo `GOOGLE_SERVICES_JSON` (ya creada con `eas env:create`); `app.config.js`
+> la aplica. Si Firebase rota la clave: actualizar el archivo local Y la env var.
+
+---
+
+## 2b. Generar el APK LOCAL (sin cola de EAS — minutos, no horas)
+
+`eas build --local` no funciona en Windows, pero Gradle directo sí. Requisitos ya
+instalados en este PC: Android SDK (`%LOCALAPPDATA%\Android\Sdk`) y el JDK
+embebido de Android Studio.
+
+```bash
+# Git Bash, en HatoSync-Mobile/
+npx expo prebuild --clean --platform android          # regenera android/ con los plugins actuales
+echo 'sdk.dir=C:\\Users\\Desarrollador\\AppData\\Local\\Android\\Sdk' > android/local.properties
+cd android && JAVA_HOME="C:\Program Files\Android\Android Studio\jbr" ./gradlew.bat assembleRelease
+```
+
+APK resultante: `android/app/build/outputs/apk/release/app-release.apk` — pásalo
+por WhatsApp/Drive o instala directo con `adb install -r ...`.
+
+Cosas a saber:
+- **Firma**: el build local firma con el keystore *debug* (default de Expo), NO con
+  el keystore de EAS → **no actualiza en sitio** una instalación hecha con APK de
+  EAS (ni al revés): hay que desinstalar antes (se pierde la BD offline local).
+  Para testers usa una sola vía (local O nube) de forma consistente.
+- `prebuild --clean` borra y regenera `android/` (está gitignored, no se pierde nada).
+- La `EXPO_PUBLIC_API_ORIGIN` la toma del `.env` local (no de eas.json): revisa a
+  qué backend apunta antes de compilar.
+- Primer build ~5-15 min (descarga dependencias de Gradle); los siguientes ~2-4 min.
+- ✅ VALIDADO (2026-07) con un matiz: en este PC el build DIRECTO desde el repo
+  falla por **MAX_PATH de Windows** (260 chars; los objetos C++ del codegen
+  llegan a ~345 y el ninja de cmake 3.22 aborta; un junction NO sirve — Gradle
+  canonicaliza). La solución que FUNCIONA: **compilar desde una copia física en
+  ruta corta** `C:\hs`:
+
+  ```bash
+  # 1) Sincronizar la copia (incremental, ~20 s)
+  robocopy "C:\Users\Desarrollador\Documents\pinogano\HatoSync-Mobile" "C:\hs" \
+    /E /MT:16 /XD .git .expo .export-check android\app\.cxx android\app\build android\build
+  # 2) ⚠ REVISAR C:\hs\.env → EXPO_PUBLIC_API_ORIGIN se INCRUSTA en el APK
+  #    (VPS: http://161.97.74.149 · ngrok: https://delegate-swarm-pushing.ngrok-free.dev)
+  # 3) Compilar
+  echo 'sdk.dir=C:/Users/Desarrollador/AppData/Local/Android/Sdk' > /c/hs/android/local.properties
+  cd /c/hs/android && JAVA_HOME="C:\Program Files\Android\Android Studio\jbr" ./gradlew.bat assembleRelease
+  ```
+  APK: `C:\hs\android\app\build\outputs\apk\release\app-release.apk` (~230 MB:
+  universal, 4 ABIs con las libs de ONNX). Primer build ~8 min; siguientes ~2-4.
+
+  Diagnósticos resueltos en el camino (aplican a cualquier build):
+  `local.properties` va con **forward slashes** (backslash = escape en
+  .properties), y `onnxruntime-react-native` traía un `build.gradle` roto con
+  Gradle 9 → parcheado vía `patches/` + postinstall (ver CLAUDE.md).
+
 ---
 
 ## 3. Alternativas SIN túnel (solo desarrollo local)

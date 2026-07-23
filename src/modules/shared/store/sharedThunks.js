@@ -2,7 +2,7 @@ import * as Crypto from 'expo-crypto'
 import apiClient from '@/api/client'
 import { crudRegistry } from './createCrudSlice'
 import { isOnline } from '@/sync/connectivity'
-import { enqueue } from '@/sync/outbox'
+import { enqueue, pendingOpsFor } from '@/sync/outbox'
 import { cacheUpsertItem, cacheDeleteItem, saveFarms } from '@/db/repositories'
 
 /**
@@ -56,18 +56,46 @@ function enrich(module, obj) {
   return { _pending: true, ...obj }
 }
 
-// GET url → replaces module.nameState with the response (array or object)
+// GET url → replaces module.nameState with the response (array or object).
+// READ-YOUR-WRITES: antes de publicar el snapshot del servidor se re-aplican
+// las operaciones que siguen PENDIENTES en la outbox (creadas offline o cuya
+// subida aún no logra pasar por señal inestable). Sin este merge, un refetch
+// al "volver" la señal pisaba la lista y los registros optimistas
+// desaparecían del listado aunque siguieran en la cola (bug de campo 2026-07).
 export const fetchState =
   ({ module, nameState, url, params }) =>
   async (dispatch) => {
     const { data } = await apiClient.get(url, { params })
-    dispatch(resolveActions(module).SET_STATE({ nameState, value: data }))
+    let value = data
+    if (Array.isArray(data)) {
+      try {
+        const ops = await pendingOpsFor(module, nameState)
+        if (ops.length) {
+          let merged = [...data]
+          for (const op of ops) {
+            const body = op.body ? JSON.parse(op.body) : null
+            const id = op.entity_id
+            if (op.method === 'POST' && body) {
+              if (!merged.some((x) => String(x.id) === String(id))) merged.unshift(enrich(module, body))
+            } else if (op.method === 'PATCH' && body) {
+              merged = merged.map((x) => (String(x.id) === String(id) ? { ...x, ...body, _pending: true } : x))
+            } else if (op.method === 'DELETE') {
+              merged = merged.filter((x) => String(x.id) !== String(id))
+            }
+          }
+          value = merged
+        }
+      } catch {
+        // sin outbox legible, publicar el snapshot tal cual
+      }
+    }
+    dispatch(resolveActions(module).SET_STATE({ nameState, value }))
     // Farms drive the farm switcher: replace the offline snapshot with the
     // server's (memberships revoked since the last download must drop out).
-    if (module === 'farms' && nameState === 'farms' && Array.isArray(data)) {
-      saveFarms(data).catch(() => {})
+    if (module === 'farms' && nameState === 'farms' && Array.isArray(value)) {
+      saveFarms(value).catch(() => {})
     }
-    return data
+    return value
   }
 
 // POST url → client UUID + optimistic; online sends now, offline queues.

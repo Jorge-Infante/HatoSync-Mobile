@@ -11,6 +11,12 @@ const ADMIN_ROLES = ['OWNER', 'ADMIN']
 
 const menuItems = [
   { title: 'Animales', icon: 'cow', route: 'AnimalList' },
+  // Identificación en campo: leer la chapeta QR → ficha del animal. Todos los
+  // roles (el socio también identifica; el backend limita lo que ve).
+  { title: 'Escanear chapeta', icon: 'qrcode-scan', route: 'ScanTag' },
+  { title: 'Lotes', icon: 'select-group', route: 'Lots' },
+  { title: 'Potreros', icon: 'map-outline', route: 'PaddockList' },
+  { title: 'Jornadas', icon: 'clipboard-play-outline', route: 'Jornadas' },
   {
     title: 'Sanidad',
     icon: 'hospital-box',
@@ -28,6 +34,8 @@ const menuItems = [
       { title: 'Razas', icon: 'dna', route: 'Breeds' },
       { title: 'Identificación', icon: 'tag-multiple-outline', route: 'IdentificationTypes' },
       { title: 'Medicamentos', icon: 'pill', route: 'MedicationList' },
+      { title: 'Lotes', icon: 'select-group', route: 'LotsCatalog' },
+      { title: 'Inactivación', icon: 'logout-variant', route: 'InactivationReasons' },
     ],
   },
   { title: 'Mis fincas', icon: 'barn', roles: [...ADMIN_ROLES, 'EMPLOYEE', null], route: 'FarmList' },

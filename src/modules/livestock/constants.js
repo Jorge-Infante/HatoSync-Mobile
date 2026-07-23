@@ -37,6 +37,34 @@ export function reproStatusColor(status) {
   return REPRO_STATUS_COLORS[status] || '#3F5847'
 }
 
+/**
+ * Etiquetas reproductivas a mostrar (decidido 2026-07, espejo del web): "Parida"
+ * (cría al pie, solo la apaga el destete) es INDEPENDIENTE del ciclo
+ * (Vacía/Servida/Preñada) — una vaca puede estar parida Y servida/preñada a la
+ * vez y se muestran ambas etiquetas. "Vacía" se omite mientras está parida.
+ */
+export function reproChips(reproduction) {
+  if (!reproduction) return []
+  const chips = []
+  if (reproduction.calf_at_side) {
+    chips.push({
+      key: 'calf',
+      label: 'Parida',
+      color: REPRO_STATUS_COLORS.CALVED,
+      icon: 'baby-bottle-outline',
+    })
+  }
+  if (reproduction.status && !(reproduction.status === 'OPEN' && reproduction.calf_at_side)) {
+    chips.push({
+      key: 'status',
+      label: reproduction.status_display,
+      color: reproStatusColor(reproduction.status),
+      icon: null,
+    })
+  }
+  return chips
+}
+
 export function eventMeta(eventType) {
   return REPRO_EVENT_META[eventType] || { label: eventType, icon: 'circle-small', color: '#3F5847' }
 }

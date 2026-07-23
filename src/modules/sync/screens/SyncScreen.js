@@ -189,8 +189,9 @@ export default function SyncScreen() {
       </Card>
 
       <Text variant="bodySmall" style={[styles.muted, styles.footnote]}>
-        Se descarga el hato completo de la finca activa (animales, fichas, reproducción y
-        catálogos). La descarga es reanudable: si se corta, vuelve a tocar para continuar.
+        Se descarga el hato completo de la finca activa (animales, fichas, reproducción,
+        catálogos y las fotos de cada animal) para consultarlo sin señal. Bajar las fotos
+        toma más tiempo y espacio; hazlo con buena conexión. Vuelve a tocar para actualizar.
       </Text>
     </ScrollView>
   )

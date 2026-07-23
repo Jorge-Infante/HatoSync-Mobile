@@ -122,7 +122,9 @@ export default function HealthAgendaScreen({ navigation }) {
     />
   )
 
-  if (loading) {
+  // Spinner solo sin datos: el early-return desmontaba el ApplicationResolver
+  // abierto cuando la señal parpadeaba (misma lección que AnimalListScreen).
+  if (loading && applications.length === 0) {
     return (
       <View style={[styles.flexCenter, { backgroundColor: theme.colors.background }]}>
         <ActivityIndicator />

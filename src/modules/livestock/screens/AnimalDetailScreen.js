@@ -19,18 +19,19 @@ import { fetchAnimalFull, deleteWeight } from '@/modules/livestock/store/livesto
 import { getErrorMessage } from '@/api/errors'
 import { useToast } from '@/modules/shared/components/Toast'
 import { selectIsPartner } from '@/modules/auth/roleSelectors'
-import { reproStatusColor, eventMeta } from '@/modules/livestock/constants'
+import { reproChips, eventMeta } from '@/modules/livestock/constants'
 import { formatDate, formatAge } from '@/utils/format'
 import AnimalGallery from '@/modules/livestock/components/AnimalGallery'
 import AnimalFormModal from '@/modules/livestock/components/AnimalFormModal'
-import RegisterBirthModal from '@/modules/livestock/components/RegisterBirthModal'
 import WeanModal from '@/modules/livestock/components/WeanModal'
 import ReproductionEventsModal from '@/modules/livestock/components/ReproductionEventsModal'
 import GenealogyModal from '@/modules/livestock/components/GenealogyModal'
 import WeightFormModal from '@/modules/livestock/components/WeightFormModal'
 import WeightChart from '@/modules/livestock/components/WeightChart'
+import InactivateAnimalModal from '@/modules/livestock/components/InactivateAnimalModal'
 import HealthTimeline from '@/modules/health/components/HealthTimeline'
 import ConfirmDialog from '@/modules/shared/components/ConfirmDialog'
+import { formatCode } from '@/modules/tags/code'
 
 // Comparativa de respaldo calculada client-side: los pesajes creados offline
 // aún no traen previous_weight_kg/diff_kg del servidor. Con datos online el
@@ -75,6 +76,7 @@ export default function AnimalDetailScreen({ route, navigation }) {
   const [weightVisible, setWeightVisible] = useState(false)
   const [weightToDelete, setWeightToDelete] = useState(null)
   const [deletingWeight, setDeletingWeight] = useState(false)
+  const [inactivateVisible, setInactivateVisible] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -99,6 +101,13 @@ export default function AnimalDetailScreen({ route, navigation }) {
     dispatch(fetchState({ module: 'livestock', nameState: 'externals', url: '/livestock/animals/', params: { external: true } })).catch(() => {})
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [animalId])
+
+  // Volviendo del escáner tras asociar/reponer chapeta: recargar el dossier
+  // (el escáner navega de vuelta con un tagRefresh nuevo en los params).
+  useEffect(() => {
+    if (route.params?.tagRefresh) load()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [route.params?.tagRefresh])
 
   if (loading) {
     return (
@@ -164,16 +173,17 @@ export default function AnimalDetailScreen({ route, navigation }) {
             <Chip compact icon={isFemale ? 'gender-female' : 'gender-male'}>
               {animal.sex_display}
             </Chip>
-            {repro.status ? (
-              <Chip compact style={{ backgroundColor: reproStatusColor(repro.status) + '22' }} textStyle={{ color: reproStatusColor(repro.status) }}>
-                {repro.status_display}
+            {reproChips(repro).map((chip) => (
+              <Chip
+                key={chip.key}
+                compact
+                icon={chip.icon || undefined}
+                style={{ backgroundColor: chip.color + '22' }}
+                textStyle={{ color: chip.color }}
+              >
+                {chip.label}
               </Chip>
-            ) : null}
-            {repro.calf_at_side ? (
-              <Chip compact icon="baby-bottle-outline">
-                Cría al pie
-              </Chip>
-            ) : null}
+            ))}
             {animal.is_external ? (
               <Chip compact icon="dna">
                 Genética externa
@@ -189,6 +199,11 @@ export default function AnimalDetailScreen({ route, navigation }) {
                 {id.identification_type_name} {id.value}
               </Chip>
             ))}
+            {animal.tag_code ? (
+              <Chip compact icon="qrcode" mode="outlined">
+                {formatCode(animal.tag_code)}
+              </Chip>
+            ) : null}
           </View>
 
           {/* Parents */}
@@ -239,6 +254,29 @@ export default function AnimalDetailScreen({ route, navigation }) {
                 Destetar
               </Button>
             ) : null}
+            {!isPartner && animal.is_active && !animal.is_external ? (
+              <Button
+                mode="contained-tonal"
+                compact
+                icon="qrcode-scan"
+                onPress={() =>
+                  navigation.navigate('ScanTag', {
+                    animalId: animal.id,
+                    animalName: animal.name,
+                    // Si ya tiene chapeta, asociar otra ES una reposición: la
+                    // actual queda anulada como perdida (replace en el backend).
+                    replace: Boolean(animal.tag_code),
+                  })
+                }
+              >
+                {animal.tag_code ? 'Reponer chapeta' : 'Asociar chapeta'}
+              </Button>
+            ) : null}
+            {!isPartner && animal.is_active && !animal.is_external ? (
+              <Button mode="contained-tonal" compact icon="logout-variant" onPress={() => setInactivateVisible(true)}>
+                Sacar del hato
+              </Button>
+            ) : null}
           </View>
         </View>
 
@@ -268,11 +306,13 @@ export default function AnimalDetailScreen({ route, navigation }) {
               <Row label="Nacimiento" value={formatDate(animal.birth_date)} />
               <Row label="Edad" value={age} />
               <Row label="Raza" value={animal.breed_name || '—'} />
+              <Row label="Lote" value={animal.lot_name || '—'} />
               <Row label="Asignado a" value={animal.assigned_to_name || '—'} />
               <Row
                 label="Identificación"
                 value={(animal.identifications || []).length ? animal.identifications.map((id) => `${id.identification_type_name}: ${id.value}`).join('   ') : '—'}
               />
+              <Row label="Chapeta QR" value={animal.tag_code ? formatCode(animal.tag_code) : 'Sin chapeta'} />
               <Row label="Estado" value={animal.is_active ? 'Activo' : 'Inactivo'} last />
             </Card.Content>
           </Card>
@@ -282,7 +322,11 @@ export default function AnimalDetailScreen({ route, navigation }) {
           <Card mode="outlined" style={styles.tabCard}>
             <Card.Content>
               <View style={styles.reproGrid}>
-                <ReproCell label="Estado" value={repro.status_display || '—'} color={repro.status ? reproStatusColor(repro.status) : undefined} />
+                <ReproCell
+                  label="Estado"
+                  value={reproChips(repro).map((chip) => chip.label).join(' · ') || '—'}
+                  color={reproChips(repro).length ? reproChips(repro)[0].color : undefined}
+                />
                 <ReproCell label="Días abiertos" value={repro.open_days != null ? String(repro.open_days) : '—'} />
                 <ReproCell label="Concepción" value={formatDate(repro.conception_date)} sub={repro.conception_source === 'SERVICE' ? 'Servicio' : repro.conception_source === 'ESTIMATED' ? 'Estimado' : ''} />
                 <ReproCell label="Parto probable" value={formatDate(repro.expected_due_date)} />
@@ -427,10 +471,29 @@ export default function AnimalDetailScreen({ route, navigation }) {
 
       {/* Modals (reload dossier after changes) */}
       <AnimalFormModal visible={editVisible} animal={animal} onDismiss={() => setEditVisible(false)} onSaved={() => { toast('Animal actualizado'); load() }} />
-      <RegisterBirthModal visible={birthVisible} mother={animal} onDismiss={() => setBirthVisible(false)} onSaved={() => { toast('Parto registrado'); load() }} />
+      {/* Parto: mismo formulario de animal en modo parto (madre fija) */}
+      <AnimalFormModal
+        visible={birthVisible}
+        birthMother={animal}
+        onDismiss={() => setBirthVisible(false)}
+        onSaved={({ calfName }) => {
+          toast(calfName ? `Parto registrado · ${calfName} añadido al hato` : 'Parto registrado')
+          load()
+        }}
+      />
       <WeanModal visible={weanVisible} mother={animal} onDismiss={() => setWeanVisible(false)} onSaved={() => { toast('Destete registrado'); load() }} />
       <ReproductionEventsModal visible={eventsVisible} animalId={animal.id} onDismiss={() => setEventsVisible(false)} onSaved={() => load()} />
       <GenealogyModal visible={genealogyVisible} animal={animal} onDismiss={() => setGenealogyVisible(false)} />
+      <InactivateAnimalModal
+        visible={inactivateVisible}
+        animal={animal}
+        onDismiss={() => setInactivateVisible(false)}
+        onSaved={({ animal: a }) => {
+          // El animal salió del hato activo: la ficha ya no aplica, volvemos.
+          toast(`${a.name} salió del hato`)
+          navigation.goBack()
+        }}
+      />
       <WeightFormModal
         visible={weightVisible}
         animal={animal}

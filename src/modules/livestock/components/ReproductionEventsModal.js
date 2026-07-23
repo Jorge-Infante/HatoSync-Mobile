@@ -18,7 +18,7 @@ import { useSelector, useDispatch } from 'react-redux'
 import PickerField from '@/modules/shared/components/PickerField'
 import DateField from '@/modules/shared/components/DateField'
 import { fetchReproductionEvents, createReproductionEvent } from '@/modules/livestock/store/livestockThunks'
-import { EVENT_TYPE_OPTIONS, RESULT_OPTIONS, eventMeta, reproStatusColor } from '@/modules/livestock/constants'
+import { EVENT_TYPE_OPTIONS, RESULT_OPTIONS, eventMeta, reproChips } from '@/modules/livestock/constants'
 import { formatDate, todayISO } from '@/utils/format'
 import { getErrorMessage } from '@/api/errors'
 
@@ -125,16 +125,17 @@ export default function ReproductionEventsModal({ visible, animalId, onDismiss, 
               {animal?.name}
             </Text>
             <View style={styles.chips}>
-              {repro.status ? (
-                <Chip compact style={{ backgroundColor: reproStatusColor(repro.status) + '22' }} textStyle={{ color: reproStatusColor(repro.status) }}>
-                  {repro.status_display}
+              {reproChips(repro).map((chip) => (
+                <Chip
+                  key={chip.key}
+                  compact
+                  icon={chip.icon || undefined}
+                  style={{ backgroundColor: chip.color + '22' }}
+                  textStyle={{ color: chip.color }}
+                >
+                  {chip.label}
                 </Chip>
-              ) : null}
-              {repro.calf_at_side ? (
-                <Chip compact icon="baby-bottle-outline">
-                  Cría al pie
-                </Chip>
-              ) : null}
+              ))}
               {repro.open_days != null ? (
                 <Text variant="bodySmall" style={styles.muted}>
                   {repro.open_days} días abiertos

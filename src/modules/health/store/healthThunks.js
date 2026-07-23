@@ -14,6 +14,15 @@ export const fetchProtocols =
   (dispatch) =>
     dispatch(fetchState({ module: 'health', nameState: 'protocols', url: '/health/protocols/', params }))
 
+// Programados recurrentes (avisar-y-ejecutar). CRUD por shared thunks
+// (module 'health', nameState 'schedules', url '/health/schedules/').
+export const fetchSchedules = () => (dispatch) =>
+  dispatch(fetchState({ module: 'health', nameState: 'schedules', url: '/health/schedules/' }))
+
+// Jornadas de protocolo ya ejecutadas (historial).
+export const fetchBatches = () => (dispatch) =>
+  dispatch(fetchState({ module: 'health', nameState: 'batches', url: '/reproduction/batches/' }))
+
 // Agenda sanitaria: aplicaciones filtrables por estado/animal/rango/vencidas.
 export const fetchApplications =
   (params = {}) =>

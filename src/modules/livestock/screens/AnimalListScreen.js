@@ -5,52 +5,60 @@ import { Image } from 'expo-image'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useSelector, useDispatch } from 'react-redux'
 import { fetchState, deleteItem } from '@/modules/shared/store/sharedThunks'
-import { useOnline } from '@/sync/connectivity'
+import { isOnline } from '@/sync/connectivity'
 import { selectIsPartner } from '@/modules/auth/roleSelectors'
 import { getErrorMessage } from '@/api/errors'
 import { useToast } from '@/modules/shared/components/Toast'
 import ConfirmDialog from '@/modules/shared/components/ConfirmDialog'
-import { reproStatusColor } from '@/modules/livestock/constants'
+import { reproChips } from '@/modules/livestock/constants'
 import { formatAge, animalThumb, MEDIA_HEADERS } from '@/utils/format'
 import AnimalActionsMenu from '@/modules/livestock/components/AnimalActionsMenu'
 import WeightFormModal from '@/modules/livestock/components/WeightFormModal'
 import AnimalFormModal from '@/modules/livestock/components/AnimalFormModal'
-import RegisterBirthModal from '@/modules/livestock/components/RegisterBirthModal'
 import WeanModal from '@/modules/livestock/components/WeanModal'
 import ReproductionEventsModal from '@/modules/livestock/components/ReproductionEventsModal'
 import GenealogyModal from '@/modules/livestock/components/GenealogyModal'
+import InactivateAnimalModal from '@/modules/livestock/components/InactivateAnimalModal'
 import TreatmentFormModal from '@/modules/health/components/TreatmentFormModal'
 
-export default function AnimalListScreen({ navigation }) {
+export default function AnimalListScreen({ navigation, route }) {
   const theme = useTheme()
   const insets = useSafeAreaInsets()
   const dispatch = useDispatch()
   const toast = useToast()
-  const online = useOnline()
   const animals = useSelector((s) => s.livestock.animals)
   const activeFarmId = useSelector((s) => (s.auth.user ? s.auth.user.active_farm : null))
   // Socio: solo consulta sus animales asignados — sin FAB ni menú de acciones.
   const isPartner = useSelector(selectIsPartner)
+  // Vista filtrada por lote: la pantalla LotAnimals reusa este componente con
+  // route.params.lotId ('none' = sin lote). En la ruta normal es undefined.
+  const lotId = route?.params?.lotId || null
+  const lotName = route?.params?.lotName || 'Lote'
 
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState('')
   const [search, setSearch] = useState('')
 
-  // dialog state
-  const [form, setForm] = useState({ visible: false, animal: null })
-  const [birth, setBirth] = useState({ visible: false, mother: null })
+  // dialog state — form maneja crear/editar Y el modo parto (birthMother)
+  const [form, setForm] = useState({ visible: false, animal: null, birthMother: null })
   const [wean, setWean] = useState({ visible: false, mother: null })
   const [events, setEvents] = useState({ visible: false, animalId: null })
   const [genealogy, setGenealogy] = useState({ visible: false, animal: null })
   const [weight, setWeight] = useState({ visible: false, animal: null })
   const [treatment, setTreatment] = useState({ visible: false, animal: null })
+  const [inactivate, setInactivate] = useState({ visible: false, animal: null })
   const [toDelete, setToDelete] = useState(null)
   const [deleting, setDeleting] = useState(false)
 
   const load = useCallback(async () => {
     setError('')
-    if (!online) return // offline: data already hydrated from the local cache
+    // isOnline() IMPERATIVO (no el hook reactivo): con señal intermitente el
+    // estado online parpadea y un `online` en las deps re-disparaba este load
+    // en cada parpadeo — el spinner de pantalla completa desmontaba el modal
+    // del formulario (se perdía lo escrito) y el refetch pisaba la lista.
+    // La subida de lo pendiente la maneja SyncProvider al reconectar.
+    if (!(await isOnline())) return // offline: data already hydrated from the local cache
     try {
       // Externals (genética externa) feed the parent/sire pickers of the modals
       await Promise.all([
@@ -60,7 +68,7 @@ export default function AnimalListScreen({ navigation }) {
     } catch (e) {
       setError(getErrorMessage(e, 'No se pudieron cargar los animales'))
     }
-  }, [dispatch, online])
+  }, [dispatch])
 
   useEffect(() => {
     setLoading(true)
@@ -73,16 +81,28 @@ export default function AnimalListScreen({ navigation }) {
     setRefreshing(false)
   }, [load])
 
-  const females = useMemo(() => animals.filter((a) => a.sex === 'FEMALE'), [animals])
-  const males = useMemo(() => animals.filter((a) => a.sex === 'MALE'), [animals])
+  // Título del header = nombre del lote en la vista filtrada.
+  useEffect(() => {
+    if (lotId) navigation.setOptions({ title: lotName })
+  }, [lotId, lotName, navigation])
+
+  // Base del hato según el lote (o todo el hato en la vista normal).
+  const byLot = useMemo(() => {
+    if (!lotId) return animals
+    if (lotId === 'none') return animals.filter((a) => !a.lot)
+    return animals.filter((a) => String(a.lot) === String(lotId))
+  }, [animals, lotId])
+
+  const females = useMemo(() => byLot.filter((a) => a.sex === 'FEMALE'), [byLot])
+  const males = useMemo(() => byLot.filter((a) => a.sex === 'MALE'), [byLot])
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
-    if (!q) return animals
-    return animals.filter((a) =>
+    if (!q) return byLot
+    return byLot.filter((a) =>
       [a.name, a.mother_name, a.father_name].filter(Boolean).some((v) => v.toLowerCase().includes(q))
     )
-  }, [animals, search])
+  }, [byLot, search])
 
   async function confirmDelete() {
     setDeleting(true)
@@ -127,11 +147,16 @@ export default function AnimalListScreen({ navigation }) {
               {item.sex_display} · {formatAge(item.birth_date)}
             </Text>
             <View style={styles.metaRow}>
-              {repro && repro.status ? (
-                <Chip compact style={[styles.reproChip, { backgroundColor: reproStatusColor(repro.status) + '22' }]} textStyle={{ color: reproStatusColor(repro.status), fontSize: 11 }}>
-                  {repro.status_display}
+              {reproChips(repro).map((chip) => (
+                <Chip
+                  key={chip.key}
+                  compact
+                  style={[styles.reproChip, { backgroundColor: chip.color + '22' }]}
+                  textStyle={{ color: chip.color, fontSize: 11 }}
+                >
+                  {chip.label}
                 </Chip>
-              ) : null}
+              ))}
               {item.mother_name ? (
                 <Text variant="bodySmall" style={styles.muted}>
                   ♀ {item.mother_name}
@@ -143,14 +168,15 @@ export default function AnimalListScreen({ navigation }) {
           <AnimalActionsMenu
             animal={item}
             onDetail={(a) => navigation.navigate('AnimalDetail', { id: a.id })}
-            onEdit={(a) => setForm({ visible: true, animal: a })}
+            onEdit={(a) => setForm({ visible: true, animal: a, birthMother: null })}
             onDelete={(a) => setToDelete(a)}
-            onBirth={(a) => setBirth({ visible: true, mother: a })}
+            onBirth={(a) => setForm({ visible: true, animal: null, birthMother: a })}
             onWean={(a) => setWean({ visible: true, mother: a })}
             onEvents={(a) => setEvents({ visible: true, animalId: a.id })}
             onGenealogy={(a) => setGenealogy({ visible: true, animal: a })}
             onWeight={(a) => setWeight({ visible: true, animal: a })}
             onTreatment={(a) => setTreatment({ visible: true, animal: a })}
+            onInactivate={(a) => setInactivate({ visible: true, animal: a })}
           />
           )}
         </Card.Content>
@@ -158,7 +184,10 @@ export default function AnimalListScreen({ navigation }) {
     )
   }
 
-  if (loading) {
+  // Spinner de pantalla completa SOLO sin datos (primer arranque). Si ya hay
+  // lista, el refetch es silencioso: este early-return desmontaba los modales
+  // (el formulario abierto perdía todo lo escrito al parpadear la señal).
+  if (loading && animals.length === 0) {
     return (
       <View style={[styles.center, { backgroundColor: theme.colors.background }]}>
         <ActivityIndicator />
@@ -190,7 +219,7 @@ export default function AnimalListScreen({ navigation }) {
             />
             <View style={styles.counters}>
               <Chip compact icon="cow" style={styles.counterChip}>
-                {animals.length} total
+                {byLot.length} total
               </Chip>
               <Chip compact icon="gender-female" style={styles.counterChip}>
                 {females.length} hembras
@@ -220,22 +249,30 @@ export default function AnimalListScreen({ navigation }) {
         }
       />
 
+      {/* Identificación por chapeta QR: leer el QR y saltar a la ficha.
+          Visible para TODOS los roles (el socio también identifica en campo). */}
+      <FAB
+        icon="qrcode-scan"
+        size="small"
+        mode="flat"
+        style={[styles.scanFab, { bottom: (isPartner ? 16 : 76) + insets.bottom }]}
+        onPress={() => navigation.navigate('ScanTag')}
+      />
       {isPartner ? null : (
-        <FAB icon="plus" label="Nuevo" style={[styles.fab, { bottom: 16 + insets.bottom }]} onPress={() => setForm({ visible: true, animal: null })} />
+        <FAB icon="plus" label="Nuevo" style={[styles.fab, { bottom: 16 + insets.bottom }]} onPress={() => setForm({ visible: true, animal: null, birthMother: null })} />
       )}
 
-      {/* Modals */}
+      {/* Modals — AnimalFormModal cubre crear/editar Y el modo parto */}
       <AnimalFormModal
         visible={form.visible}
         animal={form.animal}
-        onDismiss={() => setForm({ visible: false, animal: null })}
-        onSaved={({ isEdit }) => toast(isEdit ? 'Animal actualizado' : 'Animal registrado')}
-      />
-      <RegisterBirthModal
-        visible={birth.visible}
-        mother={birth.mother}
-        onDismiss={() => setBirth({ visible: false, mother: null })}
-        onSaved={({ calfName }) => toast(calfName ? `Parto registrado · ${calfName} añadido al hato` : 'Parto registrado')}
+        birthMother={form.birthMother}
+        prefill={lotId && lotId !== 'none' ? { lot: lotId } : undefined}
+        onDismiss={() => setForm({ visible: false, animal: null, birthMother: null })}
+        onSaved={({ isEdit, birth: isBirth, calfName }) => {
+          if (isBirth) toast(calfName ? `Parto registrado · ${calfName} añadido al hato` : 'Parto registrado')
+          else toast(isEdit ? 'Animal actualizado' : 'Animal registrado')
+        }}
       />
       <WeanModal
         visible={wean.visible}
@@ -267,6 +304,13 @@ export default function AnimalListScreen({ navigation }) {
         onSaved={() => toast('Tratamiento creado')}
       />
 
+      <InactivateAnimalModal
+        visible={inactivate.visible}
+        animal={inactivate.animal}
+        onDismiss={() => setInactivate({ visible: false, animal: null })}
+        onSaved={({ animal: a }) => toast(`${a.name} salió del hato`)}
+      />
+
       <ConfirmDialog
         visible={!!toDelete}
         onDismiss={() => setToDelete(null)}
@@ -296,5 +340,6 @@ const styles = StyleSheet.create({
   reproChip: { alignSelf: 'flex-start' },
   emptyTitle: { fontWeight: '700', marginTop: 8 },
   fab: { position: 'absolute', right: 16, bottom: 16 },
+  scanFab: { position: 'absolute', right: 16 },
   thumb: { width: 48, height: 48, borderRadius: 24, backgroundColor: 'rgba(46,125,50,0.06)' },
 })

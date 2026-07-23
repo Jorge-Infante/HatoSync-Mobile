@@ -44,6 +44,18 @@ export async function pendingEntityIds() {
   return rows.map((r) => r.entity_id)
 }
 
+// Operaciones pendientes de un listado concreto — las usa fetchState para
+// re-aplicar las escrituras locales sobre el snapshot del servidor
+// (read-your-writes): el server aún no las conoce y sin esto un refetch al
+// volver la señal PISABA los registros creados offline.
+export async function pendingOpsFor(module, nameState) {
+  const d = await db()
+  return d.getAllAsync(
+    "SELECT method, body, entity_id FROM outbox WHERE status = 'pending' AND module = ? AND name_state = ? ORDER BY seq ASC",
+    [module, nameState]
+  )
+}
+
 const isNetworkError = (e) => !e.response // no response → unreachable/offline
 
 let flushing = false

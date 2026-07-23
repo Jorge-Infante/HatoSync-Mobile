@@ -158,6 +158,38 @@ export const deleteWeight =
     await enqueue({ method: 'DELETE', url, body: null, entityId: weightId })
   }
 
+// Sacar del hato (AnimalExit): local-first con UUID de cliente (el POST a
+// /exits/ es idempotente server-side). Online el servidor inactiva al animal y
+// se refresca el hato; offline el animal sale de la lista de una vez (su JSON
+// local queda is_active=false y la hidratación filtra inactivos) y la salida
+// espera en la outbox. Eliminar la salida (deshacer) queda para el web.
+export const inactivateAnimal =
+  ({ animalId, data }) =>
+  async (dispatch, getState) => {
+    const id = data.id || Crypto.randomUUID()
+    const url = `/livestock/animals/${animalId}/exits/`
+    const body = { ...data, id }
+
+    if (await isOnline()) {
+      try {
+        const res = await apiClient.post(url, body)
+        await dispatch(refreshAnimals()).catch(() => {})
+        return res.data
+      } catch (e) {
+        if (!isNetworkError(e)) throw e
+      }
+    }
+    const state = getState().livestock
+    const animal = (state.animals || []).find((a) => String(a.id) === String(animalId))
+    if (animal) {
+      const merged = { ...animal, is_active: false, _pending: true }
+      dispatch(crudRegistry.livestock.REMOVE_ITEM({ nameState: 'animals', key: 'id', value: animalId }))
+      await cacheUpsertItem('livestock', 'animals', activeFarmId(getState), merged).catch(() => {})
+    }
+    await enqueue({ method: 'POST', url, body, entityId: id })
+    return { ...body, _pending: true }
+  }
+
 // Registrar parto = crear cría (animal) + evento BIRTH que la referencia.
 // Igual online y offline (la cría nace con su UUID de cliente).
 export const registerBirth =

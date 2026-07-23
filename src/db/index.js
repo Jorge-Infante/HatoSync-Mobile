@@ -58,6 +58,22 @@ CREATE INDEX IF NOT EXISTS idx_weights_animal ON weight_records(animal_id);
 
 CREATE TABLE IF NOT EXISTS breeds ( id TEXT PRIMARY KEY, farm_id TEXT, data TEXT );
 CREATE TABLE IF NOT EXISTS identification_types ( id TEXT PRIMARY KEY, farm_id TEXT, data TEXT );
+CREATE TABLE IF NOT EXISTS lots ( id TEXT PRIMARY KEY, farm_id TEXT, data TEXT );
+CREATE TABLE IF NOT EXISTS schedules ( id TEXT PRIMARY KEY, farm_id TEXT, data TEXT );
+CREATE TABLE IF NOT EXISTS inactivation_reasons ( id TEXT PRIMARY KEY, farm_id TEXT, data TEXT );
+
+-- Chapetas QR: el resolve offline busca por código (columna indexada); el JSON
+-- completo del tag vive en data.
+CREATE TABLE IF NOT EXISTS tags (
+  id TEXT PRIMARY KEY,
+  farm_id TEXT,
+  code TEXT,
+  status TEXT,
+  animal_id TEXT,
+  data TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_tags_code ON tags(code);
+CREATE INDEX IF NOT EXISTS idx_tags_animal ON tags(animal_id);
 CREATE TABLE IF NOT EXISTS farms ( id TEXT PRIMARY KEY, data TEXT );
 CREATE TABLE IF NOT EXISTS farm_members ( id TEXT PRIMARY KEY, farm_id TEXT, data TEXT );
 CREATE TABLE IF NOT EXISTS sync_meta ( key TEXT PRIMARY KEY, value TEXT );

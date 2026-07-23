@@ -8,7 +8,13 @@ import { createCrudSlice } from '@/modules/shared/store/createCrudSlice'
  * healthThunks.js.
  */
 const healthSlice = createCrudSlice('health', {
-  initialState: { protocols: [], applications: [] },
+  initialState: {
+    protocols: [],
+    applications: [],
+    // Jornadas (batches de protocolo) y programados recurrentes.
+    batches: [],
+    schedules: [],
+  },
 })
 
 export default healthSlice.reducer
